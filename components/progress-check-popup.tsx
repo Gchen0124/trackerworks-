@@ -101,8 +101,7 @@ export default function ProgressCheckPopup({
     <Dialog open={isOpen}>
       <DialogContent
         className={cn(
-          "max-w-md transition-all duration-300",
-          isUrgent ? "border-red-500 border-2 animate-pulse" : "border-blue-500 border-2",
+          "max-w-md border-2 border-blue-500"
         )}
       >
         <DialogHeader>
