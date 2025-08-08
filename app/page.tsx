@@ -25,6 +25,12 @@ interface TimeBlock {
     type: "calendar" | "notion" | "custom"
     color: string
   }
+  // Optional goal assigned to this time block (does not replace task)
+  goal?: {
+    id: string
+    label: string
+    color: string // Tailwind color class for badge/background
+  }
   isActive: boolean
   isCompleted: boolean
   isRecentlyMoved?: boolean
@@ -127,6 +133,13 @@ export default function TimeTracker() {
     { value: 15, label: "15 min", description: "96 blocks/day - Standard" },
     { value: 20, label: "20 min", description: "72 blocks/day - Focused" },
     { value: 30, label: "30 min", description: "48 blocks/day - High level" },
+  ]
+
+  // Three daily goal options (customize labels/colors to match your goals)
+  const GOAL_OPTIONS: { id: string; label: string; color: string }[] = [
+    { id: 'goal_focus', label: 'Focus Goal', color: 'bg-amber-200 text-amber-900' },
+    { id: 'goal_health', label: 'Health Goal', color: 'bg-emerald-200 text-emerald-900' },
+    { id: 'goal_growth', label: 'Growth Goal', color: 'bg-indigo-200 text-indigo-900' },
   ]
 
   // Mock calendar events
@@ -397,6 +410,35 @@ export default function TimeTracker() {
   const startBulkMove = () => {
     if (multiSelect.selected.length === 0) return
     setBulkMove({ active: true })
+  }
+
+  // ===== Goal assignment helpers =====
+  const assignGoalToSelected = (goalId: string) => {
+    if (multiSelect.selected.length === 0) return
+    const goal = GOAL_OPTIONS.find((g) => g.id === goalId)
+    if (!goal) return
+    setTimeBlocks((prev) =>
+      prev.map((b) => (multiSelect.selected.includes(b.id) ? { ...b, goal: { id: goal.id, label: goal.label, color: goal.color } } : b)),
+    )
+    const change: TaskChange = {
+      type: 'edit',
+      blockId: multiSelect.selected[0],
+      timestamp: new Date(),
+      affectedBlocks: [...multiSelect.selected],
+    }
+    setRecentChanges((prev) => [change, ...prev.slice(0, 4)])
+  }
+
+  const clearGoalFromSelected = () => {
+    if (multiSelect.selected.length === 0) return
+    setTimeBlocks((prev) => prev.map((b) => (multiSelect.selected.includes(b.id) ? { ...b, goal: undefined } : b)))
+    const change: TaskChange = {
+      type: 'edit',
+      blockId: multiSelect.selected[0],
+      timestamp: new Date(),
+      affectedBlocks: [...multiSelect.selected],
+    }
+    setRecentChanges((prev) => [change, ...prev.slice(0, 4)])
   }
 
   // Perform bulk move preserving relative spacing and auto-postponing conflicts
@@ -808,7 +850,7 @@ export default function TimeTracker() {
     
     // Record the change for undo
     const change: TaskChange = {
-      type: 'bulk',
+      type: 'push',
       blockId: blockIds[0],
       oldTask: undefined,
       newTask: task,
@@ -1550,6 +1592,13 @@ export default function TimeTracker() {
                 {multiSelect.selected.length > 0 && (
                   <div className="flex items-center gap-2">
                     <Badge variant="secondary">{multiSelect.selected.length} selected</Badge>
+                    {/* Goal assignment buttons */}
+                    {GOAL_OPTIONS.map((g) => (
+                      <Button key={g.id} size="sm" variant="outline" className="h-8" onClick={() => assignGoalToSelected(g.id)}>
+                        {g.label}
+                      </Button>
+                    ))}
+                    <Button size="sm" variant="secondary" className="h-8" onClick={clearGoalFromSelected}>Clear Goal</Button>
                     <Button size="sm" className="h-8" onClick={startBulkMove}>Move</Button>
                     <Button size="sm" variant="destructive" className="h-8" onClick={bulkDeleteSelected}>Delete</Button>
                     <Button size="sm" variant="outline" className="h-8" onClick={clearSelection}>Cancel</Button>
@@ -1601,9 +1650,7 @@ export default function TimeTracker() {
                             !block.task && !isCurrentBlock && !block.isActive && !block.isCompleted && !isInPlanningSelection,
                           "bg-orange-100 border-orange-300 animate-bounce": block.isRecentlyMoved && !isInPlanningSelection && !isSimpleDragTarget,
                           "bg-purple-200 border-purple-500 border-4 shadow-lg": isInPlanningSelection && dragState.isExpandMode,
-                          "bg-blue-200 border-blue-500 border-2": isSelected,
-                          "bg-blue-200 border-blue-500 border-2": isSimpleDragTarget,
-                          "opacity-50": isPlanningSource && dragState.isDragging,
+                          "border-yellow-300 border-2 ring-2 ring-yellow-200": isSelected,
                         },
                         block.task?.color &&
                           !isCurrentBlock &&
@@ -1631,6 +1678,12 @@ export default function TimeTracker() {
                       }}
                       title={`${block.startTime} - ${block.endTime}${block.task ? `: ${block.task.title}` : ""} (${blockStatus})${isInPlanningSelection ? " - SELECTED FOR PLANNING" : ""}`}
                     >
+                      {/* Goal tag on top of block */}
+                      {block.goal && (
+                        <div className={cn("absolute -top-2 left-2 px-2 py-0.5 rounded-full text-xs shadow", block.goal.color)}>
+                          {block.goal.label}
+                        </div>
+                      )}
                       <div className="flex justify-between items-start">
                         <div className="flex-1">
                           <span className={cn(
