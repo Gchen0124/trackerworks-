@@ -110,6 +110,14 @@ export default function TimeTracker() {
     taskToFill: null,
   })
 
+  // Multi-select and bulk move state
+  const [multiSelect, setMultiSelect] = useState<{ isActive: boolean; selected: string[]; lastAnchorId: string | null }>({
+    isActive: false,
+    selected: [],
+    lastAnchorId: null,
+  })
+  const [bulkMove, setBulkMove] = useState<{ active: boolean }>({ active: false })
+
   // Block duration options
   const blockDurationOptions: BlockDurationOption[] = [
     { value: 1, label: "1 min", description: "1440 blocks/day - Ultra micro focus" },
@@ -348,6 +356,136 @@ export default function TimeTracker() {
     return timeBlocks.findIndex((block) => block.id === blockId)
   }
 
+  // ===== Multi-select helpers =====
+  const toggleSelect = (blockId: string) => {
+    setMultiSelect((prev) => {
+      const exists = prev.selected.includes(blockId)
+      const selected = exists ? prev.selected.filter((id) => id !== blockId) : [...prev.selected, blockId]
+      return { ...prev, selected, lastAnchorId: blockId }
+    })
+  }
+
+  const rangeSelect = (fromId: string, toId: string) => {
+    const startIdx = timeBlocks.findIndex((b) => b.id === fromId)
+    const endIdx = timeBlocks.findIndex((b) => b.id === toId)
+    if (startIdx === -1 || endIdx === -1) return
+    const [lo, hi] = startIdx <= endIdx ? [startIdx, endIdx] : [endIdx, startIdx]
+    const ids = timeBlocks.slice(lo, hi + 1).map((b) => b.id)
+    setMultiSelect((prev) => ({
+      ...prev,
+      selected: Array.from(new Set([...prev.selected, ...ids])),
+      lastAnchorId: toId,
+    }))
+  }
+
+  const clearSelection = () => {
+    setMultiSelect({ isActive: false, selected: [], lastAnchorId: null })
+    setBulkMove({ active: false })
+  }
+
+  const bulkDeleteSelected = () => {
+    if (multiSelect.selected.length === 0) return
+    setTimeBlocks((prev) =>
+      prev.map((block) => (multiSelect.selected.includes(block.id) ? { ...block, task: undefined } : block)),
+    )
+    setNotificationType('rescheduled')
+    setShowChangeNotification(true)
+    setTimeout(() => setShowChangeNotification(false), 2000)
+    clearSelection()
+  }
+
+  const startBulkMove = () => {
+    if (multiSelect.selected.length === 0) return
+    setBulkMove({ active: true })
+  }
+
+  // Perform bulk move preserving relative spacing and auto-postponing conflicts
+  const performBulkMoveTo = (destinationBlockId: string) => {
+    if (multiSelect.selected.length === 0) return
+    const updated = [...timeBlocks]
+    const destIdx = updated.findIndex((b) => b.id === destinationBlockId)
+    if (destIdx === -1) return
+
+    // Order selected by timeline index
+    const selectedIndices = multiSelect.selected
+      .map((id) => updated.findIndex((b) => b.id === id))
+      .filter((idx) => idx !== -1)
+      .sort((a, b) => a - b)
+    if (selectedIndices.length === 0) return
+
+    const minSelIdx = selectedIndices[0]
+
+    // Validate target not in past
+    const targetStatuses = selectedIndices.map((selIdx) => {
+      const delta = selIdx - minSelIdx
+      const targetIdx = destIdx + delta
+      const targetId = updated[targetIdx]?.id
+      return targetId ? getBlockTimeStatus(targetId) : 'future'
+    })
+    if (targetStatuses.some((s) => s === 'past')) {
+      setNotificationType('rescheduled')
+      setShowChangeNotification(true)
+      setTimeout(() => setShowChangeNotification(false), 2000)
+      return
+    }
+
+    // Collect tasks and clear sources
+    const tasksToPlace: Array<{ task: any | undefined; delta: number }> = []
+    selectedIndices.forEach((selIdx) => {
+      const task = updated[selIdx].task
+      tasksToPlace.push({ task, delta: selIdx - minSelIdx })
+      updated[selIdx].task = undefined
+    })
+
+    const affected: string[] = []
+
+    // Place tasks at destination preserving spacing
+    tasksToPlace.forEach(({ task, delta }) => {
+      if (!task) return
+      const targetIdx = destIdx + delta
+      if (targetIdx >= updated.length) return
+
+      // If occupied, postpone displaced task to next empty
+      if (updated[targetIdx].task) {
+        const displaced = updated[targetIdx].task
+        let postponeIndex = targetIdx + 1
+        while (postponeIndex < updated.length && updated[postponeIndex].task) postponeIndex++
+        if (postponeIndex < updated.length) {
+          updated[postponeIndex].task = displaced
+          updated[postponeIndex].isRecentlyMoved = true
+          affected.push(updated[postponeIndex].id)
+        }
+      }
+
+      updated[targetIdx].task = task
+      updated[targetIdx].isRecentlyMoved = true
+      affected.push(updated[targetIdx].id)
+    })
+
+    setTimeBlocks(updated)
+
+    // Clear recently moved status after animation
+    setTimeout(() => {
+      setTimeBlocks((prev) => prev.map((b) => ({ ...b, isRecentlyMoved: false })))
+    }, 2000)
+
+    // Record change
+    const change: TaskChange = {
+      type: 'push',
+      blockId: destinationBlockId,
+      affectedBlocks: affected,
+      timestamp: new Date(),
+    }
+    setRecentChanges((prev) => [change, ...prev.slice(0, 4)])
+
+    // Feedback and reset
+    setNotificationType('rescheduled')
+    setShowChangeNotification(true)
+    setTimeout(() => setShowChangeNotification(false), 3000)
+    setBulkMove({ active: false })
+    setMultiSelect((prev) => ({ ...prev, selected: [], lastAnchorId: null }))
+  }
+
   const pushTasksForward = (fromBlockIndex: number, offset: number = 1) => {
     const affectedBlocks: string[] = []
     const updatedBlocks = [...timeBlocks]
@@ -386,6 +524,25 @@ export default function TimeTracker() {
   }
 
   const handleBlockClick = (blockId: string, event: React.MouseEvent) => {
+    // If we are in bulk move destination picking, treat click as destination
+    if (bulkMove.active) {
+      event.preventDefault()
+      performBulkMoveTo(blockId)
+      return
+    }
+
+    const metaKey = (event as any).metaKey || (event as any).ctrlKey
+    const shiftKey = (event as any).shiftKey
+    if (multiSelect.isActive || metaKey || shiftKey) {
+      if (shiftKey && multiSelect.lastAnchorId) {
+        rangeSelect(multiSelect.lastAnchorId, blockId)
+      } else {
+        toggleSelect(blockId)
+      }
+      return
+    }
+
+    // Default behavior: open quick input
     setSelectedBlock(blockId)
     const block = timeBlocks.find((b) => b.id === blockId)
 
@@ -1374,11 +1531,31 @@ export default function TimeTracker() {
                 <Calendar className="h-5 w-5" />
                 24-Hour Time Grid ({blockDurationMinutes}-minute blocks)
               </span>
-              {planningMode.isActive && (
-                <Badge className="bg-purple-500 text-white animate-pulse">
-                  Selecting {planningMode.selectedBlocks.length} blocks for planning
-                </Badge>
-              )}
+              <div className="flex items-center gap-2">
+                {planningMode.isActive && (
+                  <Badge className="bg-purple-500 text-white animate-pulse">
+                    Selecting {planningMode.selectedBlocks.length} blocks for planning
+                  </Badge>
+                )}
+                {bulkMove.active && (
+                  <Badge className="bg-blue-500 text-white animate-pulse">Pick destination start block…</Badge>
+                )}
+                <Button
+                  variant={multiSelect.isActive ? "default" : "outline"}
+                  className="h-8"
+                  onClick={() => setMultiSelect((prev) => ({ ...prev, isActive: !prev.isActive }))}
+                >
+                  {multiSelect.isActive ? "Exit Select" : "Select"}
+                </Button>
+                {multiSelect.selected.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary">{multiSelect.selected.length} selected</Badge>
+                    <Button size="sm" className="h-8" onClick={startBulkMove}>Move</Button>
+                    <Button size="sm" variant="destructive" className="h-8" onClick={bulkDeleteSelected}>Delete</Button>
+                    <Button size="sm" variant="outline" className="h-8" onClick={clearSelection}>Cancel</Button>
+                  </div>
+                )}
+              </div>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -1393,6 +1570,7 @@ export default function TimeTracker() {
                 const currentGradient = aiGradients[gradientIndex]
 
                 const isInPlanningSelection = planningMode.isActive && planningMode.selectedBlocks.includes(block.id)
+                const isSelected = multiSelect.selected.includes(block.id)
                 const isPlanningSource = dragState.sourceBlockId === block.id
                 const isSimpleDragTarget = !dragState.isExpandMode && dragState.isDragging && planningMode.selectedBlocks.includes(block.id)
 
@@ -1423,6 +1601,7 @@ export default function TimeTracker() {
                             !block.task && !isCurrentBlock && !block.isActive && !block.isCompleted && !isInPlanningSelection,
                           "bg-orange-100 border-orange-300 animate-bounce": block.isRecentlyMoved && !isInPlanningSelection && !isSimpleDragTarget,
                           "bg-purple-200 border-purple-500 border-4 shadow-lg": isInPlanningSelection && dragState.isExpandMode,
+                          "bg-blue-200 border-blue-500 border-2": isSelected,
                           "bg-blue-200 border-blue-500 border-2": isSimpleDragTarget,
                           "opacity-50": isPlanningSource && dragState.isDragging,
                         },
