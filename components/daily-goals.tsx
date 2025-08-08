@@ -141,9 +141,13 @@ export default function DailyGoals() {
 
   const applyPicked = (title: string) => {
     if (pickerOpenFor === null) return
-    const next = [...goals]
-    next[pickerOpenFor] = title
-    setGoals(next)
+    if (pickerOpenFor === -1) {
+      setWeeklyGoal(title)
+    } else {
+      const next = [...goals]
+      next[pickerOpenFor] = title
+      setGoals(next)
+    }
     setPickerOpenFor(null)
   }
 
@@ -171,12 +175,23 @@ export default function DailyGoals() {
         {/* Weekly Goal */}
         <div className="mb-4">
           <div className={labelCls}>Weekly Goal</div>
-          <Input
-            value={weeklyGoal}
-            onChange={(e) => setWeeklyGoal(e.target.value)}
-            placeholder="What's the big outcome this week?"
-            className="mt-1 bg-white/40 border-white/40 text-zinc-800 placeholder:text-zinc-500"
-          />
+          <div className="mt-1 flex items-center gap-2">
+            <Input
+              value={weeklyGoal}
+              onChange={(e) => setWeeklyGoal(e.target.value)}
+              placeholder="What's the big outcome this week?"
+              className="bg-white/40 border-white/40 text-zinc-800 placeholder:text-zinc-500 flex-1"
+            />
+            <Button
+              size="icon"
+              variant="outline"
+              className="bg-white/30 border-white/40 text-zinc-700 hover:bg-white/50"
+              onClick={() => openPicker(-1)}
+              title="Pick from Task Calendar"
+            >
+              <Database className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
         {/* Three Goals */}
@@ -184,24 +199,25 @@ export default function DailyGoals() {
           {[0, 1, 2].map((i) => (
             <div key={i} className="space-y-1">
               <div className={labelCls}>Goal {i + 1}</div>
-              <Input
-                value={goals[i]}
-                onChange={(e) => {
-                  const copy = [...goals]
-                  copy[i] = e.target.value
-                  setGoals(copy)
-                }}
-                placeholder={`Set Goal ${i + 1}`}
-                className="bg-white/40 border-white/40 text-zinc-800 placeholder:text-zinc-500"
-              />
-              <div className="flex justify-end">
+              <div className="flex items-center gap-2">
+                <Input
+                  value={goals[i]}
+                  onChange={(e) => {
+                    const copy = [...goals]
+                    copy[i] = e.target.value
+                    setGoals(copy)
+                  }}
+                  placeholder={`Set Goal ${i + 1}`}
+                  className="bg-white/40 border-white/40 text-zinc-800 placeholder:text-zinc-500 flex-1"
+                />
                 <Button
-                  size="sm"
+                  size="icon"
                   variant="outline"
-                  className="bg-white/30 border-white/40 text-zinc-700 hover:bg-white/50 flex items-center gap-2"
+                  className="bg-white/30 border-white/40 text-zinc-700 hover:bg-white/50"
                   onClick={() => openPicker(i)}
+                  title="Pick from Task Calendar"
                 >
-                  <Database className="h-3 w-3" /> Pick from Task Calendar
+                  <Database className="h-4 w-4" />
                 </Button>
               </div>
             </div>
@@ -259,6 +275,8 @@ export default function DailyGoals() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Weekly Goal Picker removed per user request */}
     </div>
   )
 }

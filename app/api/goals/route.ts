@@ -8,6 +8,29 @@ function richTextToPlain(property: any): string {
   return arr.map((t: any) => t.plain_text).join("")
 }
 
+// Handle rich_text/title/rollup to strings
+function propToPlainStrings(prop: any): string[] {
+  if (!prop) return []
+  if (prop.type === "rich_text" || prop.type === "title") {
+    const arr = prop[prop.type] || []
+    return Array.isArray(arr) ? arr.map((t: any) => t.plain_text || "").filter(Boolean) : []
+  }
+  if (prop.type === "rollup") {
+    const r = prop.rollup
+    if (r?.type === "array" && Array.isArray(r.array)) {
+      const out: string[] = []
+      for (const item of r.array) {
+        if (item?.type === "rich_text" || item?.type === "title") {
+          const a = item[item.type] || []
+          if (Array.isArray(a)) out.push(...a.map((t: any) => t.plain_text || "").filter(Boolean))
+        }
+      }
+      return out
+    }
+  }
+  return []
+}
+
 async function getTaskTitle(pageId: string): Promise<string> {
   try {
     const page: any = await notion.pages.retrieve({ page_id: pageId })
@@ -24,14 +47,34 @@ async function getTaskTitle(pageId: string): Promise<string> {
   return ""
 }
 
-// Query the Daily Ritual DB by date
+// Get the property type for the configured date property (date/title/rich_text)
+async function getDatePropType(): Promise<"date" | "title" | "rich_text" | "unknown"> {
+  try {
+    const db: any = await notion.databases.retrieve({ database_id: NOTION_DAILY_RITUAL_DB_ID })
+    const prop = db?.properties?.[DR_PROPS.DATE]
+    return (prop?.type as any) || "unknown"
+  } catch {
+    return "unknown"
+  }
+}
+
+// Query the Daily Ritual DB by date string, adapting to property type
 async function findDailyRitualByDate(dateStr: string) {
+  const propType = await getDatePropType()
+  let filter: any
+  if (propType === "date") {
+    filter = { property: DR_PROPS.DATE, date: { equals: dateStr } }
+  } else if (propType === "title") {
+    filter = { property: DR_PROPS.DATE, title: { equals: dateStr } }
+  } else if (propType === "rich_text") {
+    filter = { property: DR_PROPS.DATE, rich_text: { equals: dateStr } }
+  } else {
+    // Fallback: try title equals
+    filter = { property: DR_PROPS.DATE, title: { equals: dateStr } }
+  }
   const response = await notion.databases.query({
     database_id: NOTION_DAILY_RITUAL_DB_ID,
-    filter: {
-      property: DR_PROPS.DATE,
-      date: { equals: dateStr },
-    },
+    filter,
     page_size: 1,
   })
   return response.results[0] as any | undefined
@@ -40,9 +83,17 @@ async function findDailyRitualByDate(dateStr: string) {
 async function createDailyRitual(dateStr: string) {
   // Create a minimal page with date set. Weekly/Goals left empty.
   const properties: any = {}
-  properties[DR_PROPS.DATE] = { date: { start: dateStr } }
-  // In case the DB requires a title property, try to set Name if present.
-  // We attempt to find a title property schema by reading DB (best-effort omitted here for brevity).
+  const propType = await getDatePropType()
+  if (propType === "date") {
+    properties[DR_PROPS.DATE] = { date: { start: dateStr } }
+  } else if (propType === "title") {
+    properties[DR_PROPS.DATE] = { title: [{ type: "text", text: { content: dateStr } }] }
+  } else if (propType === "rich_text") {
+    properties[DR_PROPS.DATE] = { rich_text: [{ type: "text", text: { content: dateStr } }] }
+  } else {
+    // Fallback best-effort to title
+    properties[DR_PROPS.DATE] = { title: [{ type: "text", text: { content: dateStr } }] }
+  }
   try {
     const page = await notion.pages.create({
       parent: { database_id: NOTION_DAILY_RITUAL_DB_ID },
@@ -81,9 +132,8 @@ export async function GET(req: NextRequest) {
 
     const props = page.properties
 
-    const weeklyGoal = props?.[DR_PROPS.WEEKLY_GOAL]
-      ? richTextToPlain(props[DR_PROPS.WEEKLY_GOAL])
-      : ""
+    const weeklyProp = props?.[DR_PROPS.WEEKLY_GOAL]
+    const weeklyGoal = weeklyProp ? (propToPlainStrings(weeklyProp)[0] || richTextToPlain(weeklyProp) || "") : ""
 
     const goal1Ids = extractRelationIds(props?.[DR_PROPS.GOAL1])
     const goal2Ids = extractRelationIds(props?.[DR_PROPS.GOAL2])
