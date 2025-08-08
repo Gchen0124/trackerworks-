@@ -347,6 +347,12 @@ export default function ProgressCheckPopup({
     }
     // When popup opens, begin listening if supported
     if (isOpen && countdown > 0 && !hasInitiatedListeningRef.current) {
+      // Fresh session reset to avoid carryover between popups
+      decisionMadeRef.current = false
+      intentionalStopRef.current = false
+      recognitionStartingRef.current = false
+      lastStartAtRef.current = 0
+
       sessionActiveRef.current = true
       hasInitiatedListeningRef.current = true
       // Warm up mic first (non-blocking)
@@ -363,10 +369,14 @@ export default function ProgressCheckPopup({
           let waited = 0
           const iv = setInterval(() => {
             const speaking = (window as any).speechSynthesis?.speaking
+            if (waited === 0) {
+              console.debug("[Voice] Waiting for TTS to finish...")
+            }
             if (!speaking || waited >= maxWaitMs) {
               clearInterval(iv)
               if (isOpen && countdown > 0 && !decisionMadeRef.current) {
                 // slight delay to allow audio device handoff from TTS
+                console.debug("[Voice] TTS finished or max wait reached, starting recognition soon")
                 setTimeout(() => startRecognition(), 120)
               }
             } else {
