@@ -1674,8 +1674,8 @@ export default function TimeTracker() {
                       onClick={(e) => handleBlockClick(block.id, e)}
                       className={cn(
                         "p-2 rounded-lg border-2 cursor-pointer transition-all flex flex-col justify-between relative",
-                        // Adjust height and padding based on block duration
-                        blockDurationMinutes === 3 ? "h-[3.5rem] p-1" : "h-[4.5rem] p-2",
+                        // Make blocks square-ish to match width while keeping columns the same
+                        blockDurationMinutes === 3 ? "aspect-square p-1" : "aspect-square p-2",
                         {
                           "cursor-move": block.task && !isCurrentBlock,
                           "cursor-pointer": !block.task || isCurrentBlock,
@@ -1717,10 +1717,25 @@ export default function TimeTracker() {
                       }}
                       title={`${block.startTime} - ${block.endTime}${block.task ? `: ${block.task.title}` : ""} (${blockStatus})${isInPlanningSelection ? " - SELECTED FOR PLANNING" : ""}`}
                     >
-                      {/* Goal tag on top of block */}
+                      {/* Goal tag on top of block with glassmorphism */}
                       {block.goal && (
-                        <div className={cn("absolute -top-2 left-2 px-2 py-0.5 rounded-full text-xs shadow", block.goal.color)}>
-                          {block.goal.label}
+                        <div
+                          className={cn(
+                            "absolute -top-2 left-2 px-2 py-0.5 rounded-full text-[10px] sm:text-xs",
+                            "border border-white/30 bg-white/30 backdrop-blur-md shadow-md",
+                            "flex items-center gap-1"
+                          )}
+                          title={`Assigned Goal: ${block.goal.label}`}
+                        >
+                          <span
+                            className={cn(
+                              "inline-block h-2 w-2 rounded-full",
+                              block.goal.id === 'goal_1' && 'bg-amber-400',
+                              block.goal.id === 'goal_2' && 'bg-emerald-400',
+                              block.goal.id === 'goal_3' && 'bg-indigo-400'
+                            )}
+                          />
+                          <span className="text-zinc-900 drop-shadow-sm">{block.goal.label}</span>
                         </div>
                       )}
                       <div className="flex justify-between items-start">
@@ -1743,7 +1758,7 @@ export default function TimeTracker() {
                             <p
                               className={cn(
                                 blockDurationMinutes === 3 ? "text-xs font-medium truncate" : "text-sm font-medium truncate",
-                                isCurrentBlock ? "text-white" : "text-gray-900",
+                                (isCurrentBlock || isInPlanningSelection || (blockStatus === 'future' && !!block.task)) ? "text-white" : "text-gray-900",
                               )}
                             >
                               {block.task.title}
