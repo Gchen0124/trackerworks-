@@ -135,11 +135,50 @@ export default function TimeTracker() {
     { value: 30, label: "30 min", description: "48 blocks/day - High level" },
   ]
 
-  // Three daily goal options (customize labels/colors to match your goals)
-  const GOAL_OPTIONS: { id: string; label: string; color: string }[] = [
-    { id: 'goal_focus', label: 'Focus Goal', color: 'bg-amber-200 text-amber-900' },
-    { id: 'goal_health', label: 'Health Goal', color: 'bg-emerald-200 text-emerald-900' },
-    { id: 'goal_growth', label: 'Growth Goal', color: 'bg-indigo-200 text-indigo-900' },
+  // Daily goals loaded from DailyGoals snapshot in localStorage (kept in sync there)
+  const [dailyGoals, setDailyGoals] = useState<string[]>(["", "", ""]) // [goal1, goal2, goal3]
+
+  const getTodayKey = () => {
+    const d = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
+    return `goals:${d}`
+  }
+
+  const loadDailyGoalsFromStorage = () => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem(getTodayKey()) : null
+      if (!raw) return
+      const data = JSON.parse(raw)
+      if (Array.isArray(data?.goals)) {
+        setDailyGoals([
+          data.goals[0] ?? "",
+          data.goals[1] ?? "",
+          data.goals[2] ?? "",
+        ])
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  useEffect(() => {
+    loadDailyGoalsFromStorage()
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === getTodayKey()) loadDailyGoalsFromStorage()
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', onStorage)
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('storage', onStorage)
+      }
+    }
+  }, [])
+
+  const goalOptions: { id: string; label: string; color: string }[] = [
+    { id: 'goal_1', label: dailyGoals[0] || 'Goal 1', color: 'bg-amber-200 text-amber-900' },
+    { id: 'goal_2', label: dailyGoals[1] || 'Goal 2', color: 'bg-emerald-200 text-emerald-900' },
+    { id: 'goal_3', label: dailyGoals[2] || 'Goal 3', color: 'bg-indigo-200 text-indigo-900' },
   ]
 
   // Mock calendar events
@@ -415,7 +454,7 @@ export default function TimeTracker() {
   // ===== Goal assignment helpers =====
   const assignGoalToSelected = (goalId: string) => {
     if (multiSelect.selected.length === 0) return
-    const goal = GOAL_OPTIONS.find((g) => g.id === goalId)
+    const goal = goalOptions.find((g) => g.id === goalId)
     if (!goal) return
     setTimeBlocks((prev) =>
       prev.map((b) => (multiSelect.selected.includes(b.id) ? { ...b, goal: { id: goal.id, label: goal.label, color: goal.color } } : b)),
@@ -1593,7 +1632,7 @@ export default function TimeTracker() {
                   <div className="flex items-center gap-2">
                     <Badge variant="secondary">{multiSelect.selected.length} selected</Badge>
                     {/* Goal assignment buttons */}
-                    {GOAL_OPTIONS.map((g) => (
+                    {goalOptions.map((g) => (
                       <Button key={g.id} size="sm" variant="outline" className="h-8" onClick={() => assignGoalToSelected(g.id)}>
                         {g.label}
                       </Button>
