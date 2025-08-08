@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -41,6 +41,13 @@ export default function ProgressCheckPopup({
     console.log("ProgressCheckPopup props:", { isOpen, completedBlock })
   }, [isOpen, completedBlock])
 
+  // Keep a stable reference to onTimeout to avoid restarting the interval on each render
+  const onTimeoutRef = useRef(onTimeout)
+  useEffect(() => {
+    onTimeoutRef.current = onTimeout
+  }, [onTimeout])
+
+  // Smooth countdown effect (only depends on isOpen)
   useEffect(() => {
     if (!isOpen) {
       setCountdown(15)
@@ -51,7 +58,8 @@ export default function ProgressCheckPopup({
     const timer = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
-          onTimeout()
+          // Call the latest onTimeout without recreating the interval
+          onTimeoutRef.current()
           return 0
         }
 
@@ -65,7 +73,7 @@ export default function ProgressCheckPopup({
     }, 1000)
 
     return () => clearInterval(timer)
-  }, [isOpen, onTimeout])
+  }, [isOpen])
 
   const [currentTime, setCurrentTime] = useState<string>("")
 
