@@ -13,6 +13,7 @@ import VoiceInterface from "@/components/voice-interface"
 import NotionTasks from "@/components/notion-tasks"
 import QuickTaskInput from "@/components/quick-task-input"
 import ProgressCheckPopup from "@/components/progress-check-popup"
+import DailyGoals from "@/components/daily-goals"
 
 interface TimeBlock {
   id: string
@@ -1208,6 +1209,9 @@ export default function TimeTracker() {
             </Button>
           </div>
         </div>
+
+        {/* Daily Goals (Glass/Silver) */}
+        <DailyGoals />
 
         {/* Block Duration Selector */}
         <Card>
