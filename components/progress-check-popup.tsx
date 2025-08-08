@@ -18,6 +18,11 @@ interface ProgressCheckPopupProps {
       type: string
       color: string
     }
+    goal?: {
+      id: string
+      label: string
+      color: string
+    }
   } | null
   onDone: () => void
   onStillDoing: () => void
@@ -150,7 +155,11 @@ export default function ProgressCheckPopup({
             {completedBlock.task ? (
               <div className="flex items-center gap-2">
                 <Badge className={cn("text-white", completedBlock.task.color)}>{completedBlock.task.type}</Badge>
-                <span className="font-medium">{completedBlock.task.title}</span>
+                <span className="font-medium">
+                  {completedBlock.goal?.label
+                    ? `${completedBlock.goal.label} : ${completedBlock.task.title}`
+                    : completedBlock.task.title}
+                </span>
               </div>
             ) : (
               <span className="text-gray-500 italic">No task assigned</span>
@@ -210,7 +219,13 @@ export default function ProgressCheckPopup({
               size="sm"
               onClick={() =>
                 speakMessage(
-                  `Time block completed. Current time is ${currentTime}. How did you do with ${completedBlock.task?.title || "your task"}?`,
+                  `Time block completed. Current time is ${currentTime}. How did you do with ${
+                    completedBlock.task?.title
+                      ? completedBlock.goal?.label
+                        ? `${completedBlock.goal.label} : ${completedBlock.task.title}`
+                        : completedBlock.task.title
+                      : "your task"
+                  }?`,
                 )
               }
               className="text-xs text-gray-500 hover:text-gray-700"

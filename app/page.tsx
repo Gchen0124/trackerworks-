@@ -1814,7 +1814,7 @@ export default function TimeTracker() {
               setSelectedBlock(null)
             }}
             onTaskSelect={(task) => handleTaskAssign(task, selectedBlock)}
-            blockTime={timeBlocks.find((b) => b.id === selectedBlock) || null}
+            blockTime={timeBlocks.find((b) => b.id === selectedBlock) || undefined}
           />
         )}
 
@@ -1857,14 +1857,30 @@ export default function TimeTracker() {
           isEditing={!!editingBlockId && !!timeBlocks.find((b) => b.id === editingBlockId)?.task}
         />
                 {/* Progress Check Popup */}
-        <ProgressCheckPopup
-          isOpen={showProgressCheck}
-          completedBlock={completedBlockId ? timeBlocks.find((b) => b.id === completedBlockId) : null}
-          onDone={handleProgressDone}
-          onStillDoing={handleProgressStillDoing}
-          onTimeout={() => handleProgressTimeout(getCurrentBlockId(currentTime || new Date()))}
-          onClose={() => handleProgressTimeout(getCurrentBlockId(currentTime || new Date()))}
-        />
+        {showProgressCheck && (
+          <ProgressCheckPopup
+            isOpen={showProgressCheck}
+            completedBlock={(() => {
+              const b = completedBlockId ? timeBlocks.find((x) => x.id === completedBlockId) : null
+              if (!b) return null
+              return {
+                id: b.id,
+                startTime: b.startTime,
+                endTime: b.endTime,
+                task: b.task
+                  ? { title: b.task.title, type: b.task.type, color: b.task.color }
+                  : undefined,
+                goal: b.goal
+                  ? { id: b.goal.id, label: b.goal.label, color: b.goal.color }
+                  : undefined,
+              }
+            })()}
+            onDone={handleProgressDone}
+            onStillDoing={handleProgressStillDoing}
+            onTimeout={() => handleProgressTimeout(getCurrentBlockId(currentTime || new Date()))}
+            onClose={() => handleProgressTimeout(getCurrentBlockId(currentTime || new Date()))}
+          />
+        )}
       </div>
     </div>
   )
