@@ -165,12 +165,26 @@ export default function TimeTracker() {
     const onStorage = (e: StorageEvent) => {
       if (e.key === getTodayKey()) loadDailyGoalsFromStorage()
     }
+    const onDailyGoalsUpdated = (e: Event) => {
+      try {
+        const detail = (e as CustomEvent).detail as { goals?: string[] }
+        if (detail?.goals && Array.isArray(detail.goals)) {
+          setDailyGoals([
+            detail.goals[0] ?? "",
+            detail.goals[1] ?? "",
+            detail.goals[2] ?? "",
+          ])
+        }
+      } catch {}
+    }
     if (typeof window !== 'undefined') {
       window.addEventListener('storage', onStorage)
+      window.addEventListener('dailyGoalsUpdated', onDailyGoalsUpdated as EventListener)
     }
     return () => {
       if (typeof window !== 'undefined') {
         window.removeEventListener('storage', onStorage)
+        window.removeEventListener('dailyGoalsUpdated', onDailyGoalsUpdated as EventListener)
       }
     }
   }, [])

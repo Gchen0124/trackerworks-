@@ -48,6 +48,10 @@ export default function DailyGoals() {
 
   const saveToLocal = (data: GoalsResponse) => {
     localStorage.setItem(storageKey, JSON.stringify(data))
+    // Broadcast update to same-tab listeners
+    try {
+      window.dispatchEvent(new CustomEvent('dailyGoalsUpdated', { detail: data }))
+    } catch {}
   }
 
   const fetchGoals = async () => {
@@ -70,6 +74,8 @@ export default function DailyGoals() {
       setWeeklyGoal(filled.weeklyGoal)
       setGoals(filled.goals)
       setSource("notion")
+      // Notify listeners immediately
+      try { window.dispatchEvent(new CustomEvent('dailyGoalsUpdated', { detail: filled })) } catch {}
 
       // Persist a snapshot so UI still has something offline
       saveToLocal(filled)
@@ -79,6 +85,7 @@ export default function DailyGoals() {
         setWeeklyGoal(local.weeklyGoal || "")
         setGoals([local.goals?.[0] || "", local.goals?.[1] || "", local.goals?.[2] || ""])
         setSource("local")
+        try { window.dispatchEvent(new CustomEvent('dailyGoalsUpdated', { detail: local })) } catch {}
       } else {
         // empty state: let user type manually
         setWeeklyGoal("")
@@ -106,6 +113,8 @@ export default function DailyGoals() {
       source,
     }
     saveToLocal(snapshot)
+    // Also broadcast on each local edit
+    try { window.dispatchEvent(new CustomEvent('dailyGoalsUpdated', { detail: snapshot })) } catch {}
   }, [weeklyGoal, goals, dateStr, source, loading])
 
   const glassClass =
