@@ -1229,7 +1229,7 @@ export default function TimeTracker() {
     )
   }
 
-  const handleProgressStillDoing = () => {
+  const handleProgressStillDoing = (overrideTitle?: string) => {
     if (progressCheckTimer) clearTimeout(progressCheckTimer)
     if (!completedBlockId) return
 
@@ -1239,8 +1239,20 @@ export default function TimeTracker() {
     // Continue with same task in next block and push all future tasks forward
     const currentBlockId = getCurrentBlockId(currentTime || new Date())
     const currentBlockIndex = getBlockIndex(currentBlockId)
+    const completedBlockIndex = getBlockIndex(completedBlockId)
 
     const { updatedBlocks } = pushTasksForward(currentBlockIndex)
+
+    // If user said "I did <something> instead", rename the just completed block's task
+    if (overrideTitle && completedBlockIndex >= 0 && updatedBlocks[completedBlockIndex]?.task) {
+      updatedBlocks[completedBlockIndex] = {
+        ...updatedBlocks[completedBlockIndex],
+        task: {
+          ...updatedBlocks[completedBlockIndex].task!,
+          title: overrideTitle,
+        },
+      }
+    }
 
     // Set the continued task in current block
     updatedBlocks[currentBlockIndex].task = {

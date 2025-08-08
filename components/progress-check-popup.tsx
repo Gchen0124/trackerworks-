@@ -25,7 +25,7 @@ interface ProgressCheckPopupProps {
     }
   } | null
   onDone: () => void
-  onStillDoing: () => void
+  onStillDoing: (overrideTitle?: string) => void
   onTimeout: () => void
   onClose: () => void
 }
@@ -178,6 +178,20 @@ export default function ProgressCheckPopup({
       "continue task",
       "carry on",
     ]
+
+    // Pattern: "I did <something> instead"
+    const insteadMatch = text.match(/^(?:i\s+(?:have\s+)?did|i\s+did|i\'ve\s+done|i\s+did\s+do)\s+(.+?)\s+instead\.?$/i) ||
+      text.match(/\b(i\s+did)\s+(.+?)\s+instead\b/i)
+
+    if (insteadMatch && !decisionMadeRef.current) {
+      const override = (insteadMatch[1] || insteadMatch[2] || "").trim()
+      if (override) {
+        decisionMadeRef.current = true
+        stopRecognition()
+        onStillDoing(override)
+        return
+      }
+    }
 
     // Basic contains matching
     const saysDone = donePhrases.some((p) => text.includes(p))
@@ -467,7 +481,7 @@ export default function ProgressCheckPopup({
             </Button>
 
             <Button
-              onClick={onStillDoing}
+              onClick={() => onStillDoing()}
               variant="outline"
               className="flex flex-col items-center gap-2 h-20 border-orange-500 text-orange-600 hover:bg-orange-50 bg-transparent"
             >
