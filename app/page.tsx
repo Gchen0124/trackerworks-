@@ -52,6 +52,21 @@ interface BlockDurationOption {
   description: string
 }
 
+interface DragState {
+  sourceBlockId: string | null
+  task: any | null
+  isDragging: boolean
+  isExpandMode: boolean  // Track if dragging from expand button
+}
+
+interface PlanningMode {
+  isActive: boolean
+  startBlockId: string | null
+  endBlockId: string | null
+  selectedBlocks: string[]
+  taskToFill: any | null
+}
+
 export default function TimeTracker() {
   const [currentTime, setCurrentTime] = useState<Date | null>(null)
   const [isTimerRunning, setIsTimerRunning] = useState(false)
@@ -76,6 +91,23 @@ export default function TimeTracker() {
   const [completedBlockId, setCompletedBlockId] = useState<string | null>(null)
   const [audioContext, setAudioContext] = useState<AudioContext | null>(null)
   const [notificationType, setNotificationType] = useState<"rescheduled" | "disrupted" | "paused">("rescheduled")
+  
+  // Drag and drop state for planning feature
+  const [dragState, setDragState] = useState<DragState>({
+    sourceBlockId: null,
+    task: null,
+    isDragging: false,
+    isExpandMode: false,
+  })
+  
+  // Planning mode state
+  const [planningMode, setPlanningMode] = useState<PlanningMode>({
+    isActive: false,
+    startBlockId: null,
+    endBlockId: null,
+    selectedBlocks: [],
+    taskToFill: null,
+  })
 
   // Block duration options
   const blockDurationOptions: BlockDurationOption[] = [
@@ -315,7 +347,7 @@ export default function TimeTracker() {
     return timeBlocks.findIndex((block) => block.id === blockId)
   }
 
-  const pushTasksForward = (fromBlockIndex: number) => {
+  const pushTasksForward = (fromBlockIndex: number, offset: number = 1) => {
     const affectedBlocks: string[] = []
     const updatedBlocks = [...timeBlocks]
 
@@ -332,9 +364,9 @@ export default function TimeTracker() {
       }
     }
 
-    // Place tasks in new positions (one block later)
+    // Place tasks in new positions (offset blocks later)
     tasksToMove.forEach(({ task }, index) => {
-      const newIndex = fromBlockIndex + 1 + index
+      const newIndex = fromBlockIndex + offset + index
       if (newIndex < updatedBlocks.length) {
         updatedBlocks[newIndex].task = task
         updatedBlocks[newIndex].isRecentlyMoved = true
@@ -371,6 +403,351 @@ export default function TimeTracker() {
     )
     setShowTaskSelector(false)
     setSelectedBlock(null)
+  }
+
+  // Drag and drop handlers for planning feature
+  const handleDragStart = (e: React.DragEvent, block: TimeBlock, isExpand: boolean = false) => {
+    if (!block.task) return
+    
+    setDragState({
+      sourceBlockId: block.id,
+      task: block.task,
+      isDragging: true,
+      isExpandMode: isExpand,
+    })
+    
+    e.dataTransfer.effectAllowed = isExpand ? 'copy' : 'move'
+    e.dataTransfer.setData('text/plain', block.task.title)
+  }
+
+  const handleDragEnd = () => {
+    setDragState({
+      sourceBlockId: null,
+      task: null,
+      isDragging: false,
+      isExpandMode: false,
+    })
+    
+    // Clear planning mode if active
+    if (planningMode.isActive) {
+      setPlanningMode({
+        isActive: false,
+        startBlockId: null,
+        endBlockId: null,
+        selectedBlocks: [],
+        taskToFill: null,
+      })
+    }
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = dragState.isExpandMode ? 'copy' : 'move'
+  }
+
+  const handleDragEnter = (e: React.DragEvent, block: TimeBlock) => {
+    if (!dragState.isDragging || !dragState.task) return
+    
+    // Activate multi-block planning mode if expand mode is enabled
+    if (dragState.isExpandMode) {
+      // If planning mode is not active, start it from the source block
+      if (!planningMode.isActive) {
+        const sourceIdx = timeBlocks.findIndex(b => b.id === dragState.sourceBlockId)
+        const targetIdx = timeBlocks.findIndex(b => b.id === block.id)
+        
+        if (sourceIdx !== -1 && targetIdx !== -1 && targetIdx > sourceIdx) {
+          // Only allow dragging to future blocks
+          const selectedIds = timeBlocks.slice(sourceIdx + 1, targetIdx + 1).map(b => b.id)
+          setPlanningMode({
+            isActive: true,
+            startBlockId: dragState.sourceBlockId,
+            endBlockId: block.id,
+            selectedBlocks: selectedIds,
+            taskToFill: dragState.task,
+          })
+        }
+      } else {
+        // Update the end block and selected blocks range
+        const sourceIdx = timeBlocks.findIndex(b => b.id === dragState.sourceBlockId)
+        const targetIdx = timeBlocks.findIndex(b => b.id === block.id)
+        
+        if (sourceIdx !== -1 && targetIdx !== -1 && targetIdx > sourceIdx) {
+          const selectedIds = timeBlocks.slice(sourceIdx + 1, targetIdx + 1).map(b => b.id)
+          setPlanningMode(prev => ({
+            ...prev,
+            endBlockId: block.id,
+            selectedBlocks: selectedIds,
+          }))
+        }
+      }
+    } else {
+      // For simple drag, just track the current hover block
+      setPlanningMode({
+        isActive: false,
+        startBlockId: null,
+        endBlockId: block.id,
+        selectedBlocks: [block.id],
+        taskToFill: null,
+      })
+    }
+  }
+
+  const handleDrop = (e: React.DragEvent, targetBlock: TimeBlock) => {
+    e.preventDefault()
+    
+    if (!dragState.task) return
+    
+    if (dragState.isExpandMode && planningMode.selectedBlocks.length > 0) {
+      // Expand mode - fill blocks with numbered tasks
+      expandTaskToBlocks(planningMode.selectedBlocks, dragState.task)
+    } else if (!dragState.isExpandMode) {
+      // Simple drag mode - just move the task
+      simpleTaskMove(dragState.sourceBlockId!, targetBlock.id, dragState.task)
+    }
+    
+    // Reset states
+    handleDragEnd()
+  }
+
+  const simpleTaskMove = (sourceBlockId: string, targetBlockId: string, task: any) => {
+    // Don't allow moving to the same block
+    if (sourceBlockId === targetBlockId) return
+    
+    const updatedBlocks = [...timeBlocks]
+    const sourceIndex = updatedBlocks.findIndex(b => b.id === sourceBlockId)
+    const targetIndex = updatedBlocks.findIndex(b => b.id === targetBlockId)
+    
+    if (sourceIndex === -1 || targetIndex === -1) return
+    
+    // Check if we're moving to a past block (not allowed)
+    const targetBlockStatus = getBlockTimeStatus(targetBlockId)
+    if (targetBlockStatus === 'past') {
+      // Show notification that we can't move to past blocks
+      setNotificationType('rescheduled')
+      setShowChangeNotification(true)
+      setTimeout(() => setShowChangeNotification(false), 2000)
+      return
+    }
+    
+    const targetBlock = updatedBlocks[targetIndex]
+    const affectedBlocks: string[] = [sourceBlockId, targetBlockId]
+    
+    // If target block has a task, we need to postpone it
+    if (targetBlock.task) {
+      const taskToPostpone = targetBlock.task
+      
+      // Find the next available empty block after target
+      let postponeIndex = targetIndex + 1
+      while (postponeIndex < updatedBlocks.length && updatedBlocks[postponeIndex].task) {
+        postponeIndex++
+      }
+      
+      // If we found an empty block, move the displaced task there
+      if (postponeIndex < updatedBlocks.length) {
+        updatedBlocks[postponeIndex].task = taskToPostpone
+        updatedBlocks[postponeIndex].isRecentlyMoved = true
+        affectedBlocks.push(updatedBlocks[postponeIndex].id)
+      }
+    }
+    
+    // Move the dragged task to target block
+    updatedBlocks[targetIndex].task = task
+    updatedBlocks[targetIndex].isRecentlyMoved = true
+    
+    // Clear the source block
+    updatedBlocks[sourceIndex].task = undefined
+    updatedBlocks[sourceIndex].isRecentlyMoved = true
+    
+    // Update state
+    setTimeBlocks(updatedBlocks)
+    
+    // Clear recently moved status after animation
+    setTimeout(() => {
+      setTimeBlocks(prev => prev.map(block => ({ ...block, isRecentlyMoved: false })))
+    }, 2000)
+    
+    // Record the change for undo
+    const change: TaskChange = {
+      type: 'edit',
+      blockId: targetBlockId,
+      oldTask: targetBlock.task,
+      newTask: task,
+      affectedBlocks,
+      timestamp: new Date(),
+    }
+    setRecentChanges(prev => [change, ...prev.slice(0, 4)])
+    
+    // Show notification
+    setNotificationType('rescheduled')
+    setShowChangeNotification(true)
+    setTimeout(() => setShowChangeNotification(false), 3000)
+  }
+
+  const expandTaskToBlocks = (blockIds: string[], task: any) => {
+    const updatedBlocks = [...timeBlocks]
+    const affectedBlocks: string[] = []
+    
+    // Remove any trailing numbers from the task title
+    const baseTitle = task.title.replace(/\d+$/, '').trim()
+    
+    // First, push existing tasks forward by the number of blocks we're filling
+    const firstBlockIdx = updatedBlocks.findIndex(b => b.id === blockIds[0])
+    const lastBlockIdx = updatedBlocks.findIndex(b => b.id === blockIds[blockIds.length - 1])
+    
+    if (firstBlockIdx === -1 || lastBlockIdx === -1) return
+    
+    // Collect tasks that need to be postponed
+    const tasksToPostpone: Array<{ task: any; originalIndex: number }> = []
+    for (let i = firstBlockIdx; i <= lastBlockIdx; i++) {
+      if (updatedBlocks[i].task) {
+        tasksToPostpone.push({
+          task: updatedBlocks[i].task,
+          originalIndex: i,
+        })
+      }
+    }
+    
+    // Clear the blocks we're filling
+    for (let i = firstBlockIdx; i <= lastBlockIdx; i++) {
+      updatedBlocks[i].task = undefined
+    }
+    
+    // Fill the blocks with numbered tasks (starting from 2 since original is 1)
+    blockIds.forEach((blockId, index) => {
+      const blockIdx = updatedBlocks.findIndex(b => b.id === blockId)
+      if (blockIdx !== -1) {
+        updatedBlocks[blockIdx].task = {
+          ...task,
+          title: `${baseTitle}${index + 2}`, // Start numbering from 2
+          id: `${task.id}-${index + 2}`,
+        }
+        updatedBlocks[blockIdx].isRecentlyMoved = true
+        affectedBlocks.push(blockId)
+      }
+    })
+    
+    // Postpone the displaced tasks to empty blocks after the filled range
+    let postponeIdx = lastBlockIdx + 1
+    tasksToPostpone.forEach(({ task }) => {
+      while (postponeIdx < updatedBlocks.length && updatedBlocks[postponeIdx].task) {
+        postponeIdx++
+      }
+      if (postponeIdx < updatedBlocks.length) {
+        updatedBlocks[postponeIdx].task = task
+        updatedBlocks[postponeIdx].isRecentlyMoved = true
+        affectedBlocks.push(updatedBlocks[postponeIdx].id)
+        postponeIdx++
+      }
+    })
+    
+    // Update state
+    setTimeBlocks(updatedBlocks)
+    
+    // Clear recently moved status after animation
+    setTimeout(() => {
+      setTimeBlocks(prev => prev.map(block => ({ ...block, isRecentlyMoved: false })))
+    }, 2000)
+    
+    // Record the change for undo
+    const change: TaskChange = {
+      type: 'bulk',
+      blockId: blockIds[0],
+      oldTask: undefined,
+      newTask: task,
+      affectedBlocks,
+      timestamp: new Date(),
+    }
+    setRecentChanges(prev => [change, ...prev.slice(0, 4)])
+    
+    // Show notification
+    setNotificationType('rescheduled')
+    setShowChangeNotification(true)
+    setTimeout(() => setShowChangeNotification(false), 3000)
+  }
+
+  const fillBlocksWithNumberedTasks = (blockIds: string[], task: any) => {
+    const updatedBlocks = [...timeBlocks]
+    const affectedBlocks: string[] = []
+    
+    // First, collect all existing tasks that need to be postponed
+    const tasksToPostpone: Array<{ task: any; originalIndex: number }> = []
+    const blockIndices = blockIds.map(id => updatedBlocks.findIndex(b => b.id === id)).filter(idx => idx !== -1)
+    
+    if (blockIndices.length === 0) return
+    
+    const minIndex = Math.min(...blockIndices)
+    const maxIndex = Math.max(...blockIndices)
+    
+    // Collect tasks that need to be postponed from the target range
+    for (let i = minIndex; i <= maxIndex; i++) {
+      if (updatedBlocks[i].task && !blockIds.includes(updatedBlocks[i].id)) {
+        continue // Skip blocks not in selection
+      }
+      if (updatedBlocks[i].task) {
+        tasksToPostpone.push({
+          task: updatedBlocks[i].task,
+          originalIndex: i,
+        })
+      }
+    }
+    
+    // Fill selected blocks with numbered versions of the dragged task
+    let taskNumber = 1
+    blockIds.forEach(blockId => {
+      const blockIndex = updatedBlocks.findIndex(b => b.id === blockId)
+      if (blockIndex !== -1) {
+        // Create numbered task title
+        const baseTitle = task.title.replace(/\d+$/, '').trim() // Remove existing numbers
+        const numberedTitle = `${baseTitle} #${taskNumber}`
+        
+        updatedBlocks[blockIndex].task = {
+          ...task,
+          id: `${task.id}-${taskNumber}`,
+          title: numberedTitle,
+        }
+        updatedBlocks[blockIndex].isRecentlyMoved = true
+        affectedBlocks.push(blockId)
+        taskNumber++
+      }
+    })
+    
+    // Postpone original tasks to blocks after the filled range
+    let postponeIndex = maxIndex + 1
+    tasksToPostpone.forEach(({ task }) => {
+      // Find next available block
+      while (postponeIndex < updatedBlocks.length && updatedBlocks[postponeIndex].task) {
+        postponeIndex++
+      }
+      
+      if (postponeIndex < updatedBlocks.length) {
+        updatedBlocks[postponeIndex].task = task
+        updatedBlocks[postponeIndex].isRecentlyMoved = true
+        affectedBlocks.push(updatedBlocks[postponeIndex].id)
+        postponeIndex++
+      }
+    })
+    
+    // Update state
+    setTimeBlocks(updatedBlocks)
+    
+    // Clear recently moved status after animation
+    setTimeout(() => {
+      setTimeBlocks(prev => prev.map(block => ({ ...block, isRecentlyMoved: false })))
+    }, 2000)
+    
+    // Record the change for undo
+    const change: TaskChange = {
+      type: 'push',
+      blockId: blockIds[0],
+      affectedBlocks,
+      timestamp: new Date(),
+    }
+    setRecentChanges(prev => [change, ...prev.slice(0, 4)])
+    
+    // Show notification
+    setNotificationType('rescheduled')
+    setShowChangeNotification(true)
+    setTimeout(() => setShowChangeNotification(false), 3000)
   }
 
   const startTimer = () => {
@@ -518,6 +895,9 @@ export default function TimeTracker() {
 
   // Calculate grid columns based on block duration for better layout
   const getGridColumns = () => {
+    // For 3-minute blocks, use exactly 10 columns as requested
+    if (blockDurationMinutes === 3) return 10
+    
     const blocksPerHour = 60 / blockDurationMinutes
     if (blocksPerHour <= 4) return 4
     if (blocksPerHour <= 6) return 6
@@ -646,57 +1026,73 @@ export default function TimeTracker() {
   }
 
   const handleProgressTimeout = (nextBlockId: string) => {
-    console.log("handleProgressTimeout called:", { completedBlockId, nextBlockId })
+    console.log("handleProgressTimeout called:", { completedBlockId, nextBlockId, time: new Date().toISOString() })
 
-    if (!completedBlockId) return
+    if (!completedBlockId) {
+      console.log("No completedBlockId, returning early")
+      return
+    }
 
-    // Get the completed block and its original task
-    const completedBlock = timeBlocks.find((b) => b.id === completedBlockId)
-    const originalTask = completedBlock?.task
-
-    // Step 1: Mark the completed block as "Disrupted"
-    setTimeBlocks((prev) =>
-      prev.map((block) =>
-        block.id === completedBlockId
-          ? {
-              ...block,
-              isActive: false,
-              isCompleted: false,
-              task: {
-                id: `disrupted-${Date.now()}`,
-                title: "Disrupted - No Response",
-                type: "custom",
-                color: "bg-red-500",
-              },
-            }
-          : block,
-      ),
-    )
-
-    // Step 2: Get the next block (current time block) and push all tasks forward
     const nextBlockIndex = getBlockIndex(nextBlockId)
-    const { updatedBlocks } = pushTasksForward(nextBlockIndex)
+    const completedBlockIndex = getBlockIndex(completedBlockId)
 
-    // Step 3: If the completed block had a task, move it to the next available slot
-    if (originalTask) {
-      // Find the first available slot after pushing tasks forward
-      let targetIndex = nextBlockIndex + 1 // Skip the paused block
-      while (targetIndex < updatedBlocks.length && updatedBlocks[targetIndex].task) {
-        targetIndex++
-      }
+    // Step 1: Move all future tasks 2 blocks away (to make room for the undone task)
+    const { updatedBlocks } = pushTasksForward(nextBlockIndex, 2)
+
+    // Step 2: Move the completed block's task 2 blocks into the future (so user can restart where they left off)
+    const completedBlock = updatedBlocks[completedBlockIndex]
+    console.log("Completed block at index:", completedBlockIndex, "Task:", completedBlock?.task?.title)
+    
+    if (completedBlock?.task && 
+        !completedBlock.task.title?.includes("Paused") && 
+        !completedBlock.task.title?.includes("Disrupted") &&
+        !completedBlock.task.title?.includes("Interrupted")) {
+      
+      // The target should be exactly 2 blocks after the current block (nextBlockIndex + 2)
+      const targetIndex = nextBlockIndex + 1
+      console.log("Moving completed task from index", completedBlockIndex, "to block index:", targetIndex)
+      
       if (targetIndex < updatedBlocks.length) {
+        // Store the task before clearing it
+        const taskToMove = { ...completedBlock.task }
+        
+        // Clear the original position first
+        updatedBlocks[completedBlockIndex].task = undefined
+        
+        // Place the task at the target position
         updatedBlocks[targetIndex].task = {
-          ...originalTask,
+          ...taskToMove,
           id: `rescheduled-${Date.now()}`,
         }
         updatedBlocks[targetIndex].isRecentlyMoved = true
+        
+        console.log("Task moved successfully from", completedBlockIndex, "to", targetIndex)
+      } else {
+        console.log("Target index", targetIndex, "is out of bounds")
+      }
+    } else {
+      console.log("No valid task to reschedule:", completedBlock?.task?.title)
+    }
+
+    // Step 3: Mark the completed block as "Interrupted"
+    if (completedBlockIndex >= 0 && completedBlockIndex < updatedBlocks.length) {
+      updatedBlocks[completedBlockIndex] = {
+        ...updatedBlocks[completedBlockIndex],
+        isActive: false,
+        isCompleted: false,
+        task: {
+          id: `interrupted-${Date.now()}`,
+          title: "Interrupted - No Response",
+          type: "custom",
+          color: "bg-red-500",
+        },
       }
     }
 
-    // Step 4: Mark the next block (current time) as "Paused"
+    // Step 4: Mark the current block as "Paused"
     updatedBlocks[nextBlockIndex].task = {
       id: `paused-${Date.now()}`,
-      title: "Paused - Previous Disruption",
+      title: "Paused - Previous Interruption",
       type: "custom",
       color: "bg-gray-500",
     }
@@ -705,7 +1101,7 @@ export default function TimeTracker() {
 
     // Voice alert
     speakTimeAlert(
-      "No response detected. Previous block marked as disrupted. Current block marked as paused. All future tasks delayed.",
+      "No response detected. Previous block marked as interrupted. Current block marked as paused. All future tasks delayed by 2 blocks.",
     )
 
     // Show notification
@@ -717,10 +1113,10 @@ export default function TimeTracker() {
     const change: TaskChange = {
       type: "push",
       blockId: completedBlockId,
-      oldTask: originalTask,
+      oldTask: completedBlock?.task,
       newTask: {
-        id: `disrupted-${Date.now()}`,
-        title: "Disrupted - No Response",
+        id: `interrupted-${Date.now()}`,
+        title: "Interrupted - No Response",
         type: "custom",
         color: "bg-red-500",
       },
@@ -739,6 +1135,35 @@ export default function TimeTracker() {
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-7xl mx-auto space-y-6">
+        {/* Drag Mode Instructions */}
+        {dragState.isDragging && (
+          <div className={`mb-4 p-3 rounded-lg animate-pulse ${
+            dragState.isExpandMode 
+              ? 'bg-purple-100 border border-purple-300' 
+              : 'bg-blue-100 border border-blue-300'
+          }`}>
+            <div className="flex items-center gap-2">
+              {dragState.isExpandMode ? (
+                <>
+                  <span className="text-purple-800 font-semibold">📋 Expand Mode:</span>
+                  <span className="text-purple-700">
+                    Drag to future blocks to fill them with "{dragState.task?.title}" (numbered 2, 3, 4...)
+                    Existing tasks will be postponed.
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="text-blue-800 font-semibold">↔️ Simple Move Mode:</span>
+                  <span className="text-blue-700">
+                    Drop on any future block to move "{dragState.task?.title}" there.
+                    If occupied, that task will be postponed.
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -749,6 +1174,9 @@ export default function TimeTracker() {
             <p className="text-xs text-gray-400">
               Current Block: {currentBlockId} | Timer: {isTimerRunning ? "ON" : "OFF"} | Popup:{" "}
               {showProgressCheck ? "OPEN" : "CLOSED"}
+            </p>
+            <p className="text-xs text-blue-600 mt-1">
+              💡 Tip: Drag to move tasks | Use expand button (⬇️) for multi-block planning!
             </p>
           </div>
           <div className="flex gap-2">
@@ -898,26 +1326,17 @@ export default function TimeTracker() {
             <div className="flex items-center justify-between">
               <div className="flex-1">
                 {currentBlock?.task ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Badge className={cn("text-white", currentBlock.task.color)}>{currentBlock.task.type}</Badge>
-                      <span className="font-medium text-lg">{currentBlock.task.title}</span>
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      Current Block: {currentBlock.startTime} - {currentBlock.endTime} ({blockDurationMinutes} min)
-                    </div>
-                    <div className="text-sm font-medium text-blue-600">
-                      Block Time Remaining: {getRemainingTime(currentBlock)}
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-lg">{currentBlock.task.title}</span>
+                    <div className="text-xl font-mono font-bold text-blue-600">
+                      {getRemainingTime(currentBlock)}
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    <div className="text-gray-500 text-lg">No task assigned for current time block</div>
-                    <div className="text-sm text-gray-400">
-                      {currentBlock?.startTime} - {currentBlock?.endTime} ({blockDurationMinutes} min)
-                    </div>
-                    <div className="text-sm font-medium text-blue-600">
-                      Block Time Remaining: {currentBlock ? getRemainingTime(currentBlock) : "0:00"}
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-500 text-lg">No task assigned</span>
+                    <div className="text-xl font-mono font-bold text-blue-600">
+                      {currentBlock ? getRemainingTime(currentBlock) : "0:00"}
                     </div>
                   </div>
                 )}
@@ -946,9 +1365,16 @@ export default function TimeTracker() {
         {/* Time Grid */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Calendar className="h-5 w-5" />
-              24-Hour Time Grid ({blockDurationMinutes}-minute blocks)
+            <CardTitle className="flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Calendar className="h-5 w-5" />
+                24-Hour Time Grid ({blockDurationMinutes}-minute blocks)
+              </span>
+              {planningMode.isActive && (
+                <Badge className="bg-purple-500 text-white animate-pulse">
+                  Selecting {planningMode.selectedBlocks.length} blocks for planning
+                </Badge>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -962,29 +1388,47 @@ export default function TimeTracker() {
                 const hour = Math.floor(index / 6)
                 const currentGradient = aiGradients[gradientIndex]
 
+                const isInPlanningSelection = planningMode.isActive && planningMode.selectedBlocks.includes(block.id)
+                const isPlanningSource = dragState.sourceBlockId === block.id
+                const isSimpleDragTarget = !dragState.isExpandMode && dragState.isDragging && planningMode.selectedBlocks.includes(block.id)
+
                 return (
                   <div key={block.id} className="relative">
                     <div
+                      draggable={!!block.task && !dragState.isDragging}
+                      onDragStart={(e) => handleDragStart(e, block, false)}
+                      onDragEnd={handleDragEnd}
+                      onDragOver={handleDragOver}
+                      onDragEnter={(e) => handleDragEnter(e, block)}
+                      onDrop={(e) => handleDrop(e, block)}
                       onClick={(e) => handleBlockClick(block.id, e)}
                       className={cn(
-                        "h-20 w-full border-2 cursor-pointer transition-all duration-500 hover:border-gray-400 rounded-lg p-2 relative overflow-hidden",
+                        "p-2 rounded-lg border-2 cursor-pointer transition-all flex flex-col justify-between relative",
+                        // Adjust height and padding based on block duration
+                        blockDurationMinutes === 3 ? "h-[3.5rem] p-1" : "h-[4.5rem] p-2",
                         {
+                          "cursor-move": block.task && !isCurrentBlock,
+                          "cursor-pointer": !block.task || isCurrentBlock,
                           [`bg-gradient-to-br ${currentGradient} border-transparent text-white shadow-xl`]:
                             isCurrentBlock,
-                          "bg-green-100 border-green-300": block.isCompleted && !isCurrentBlock,
-                          "bg-yellow-100 border-yellow-300 animate-pulse": block.isActive && !isCurrentBlock,
-                          "bg-red-100 border-red-300": block.task?.title?.includes("Disrupted") && !isCurrentBlock,
-                          "bg-gray-100 border-gray-400": block.task?.title?.includes("Paused") && !isCurrentBlock,
+                          "bg-green-100 border-green-300": block.isCompleted && !isCurrentBlock && !isInPlanningSelection,
+                          "bg-yellow-100 border-yellow-300 animate-pulse": block.isActive && !isCurrentBlock && !isInPlanningSelection,
+                          "bg-red-100 border-red-300": block.task?.title?.includes("Disrupted") && !isCurrentBlock && !isInPlanningSelection,
+                          "bg-gray-100 border-gray-400": block.task?.title?.includes("Paused") && !isCurrentBlock && !isInPlanningSelection,
                           "bg-gray-50 border-gray-200 hover:bg-gray-100":
-                            !block.task && !isCurrentBlock && !block.isActive && !block.isCompleted,
-                          "bg-orange-100 border-orange-300 animate-bounce": block.isRecentlyMoved,
+                            !block.task && !isCurrentBlock && !block.isActive && !block.isCompleted && !isInPlanningSelection,
+                          "bg-orange-100 border-orange-300 animate-bounce": block.isRecentlyMoved && !isInPlanningSelection && !isSimpleDragTarget,
+                          "bg-purple-200 border-purple-500 border-4 shadow-lg": isInPlanningSelection && dragState.isExpandMode,
+                          "bg-blue-200 border-blue-500 border-2": isSimpleDragTarget,
+                          "opacity-50": isPlanningSource && dragState.isDragging,
                         },
                         block.task?.color &&
                           !isCurrentBlock &&
                           !block.isActive &&
                           !block.isCompleted &&
                           !block.task?.title?.includes("Disrupted") &&
-                          !block.task?.title?.includes("Paused")
+                          !block.task?.title?.includes("Paused") &&
+                          !isInPlanningSelection
                           ? `${block.task.color} text-white`
                           : "",
                       )}
@@ -993,104 +1437,76 @@ export default function TimeTracker() {
                           ? "breathe 2s ease-in-out infinite, star-glow 1s ease-in-out infinite"
                           : block.isRecentlyMoved
                             ? "slide-in 0.5s ease-out"
-                            : undefined,
+                            : isInPlanningSelection
+                              ? "pulse 1s ease-in-out infinite"
+                              : undefined,
                         boxShadow: isCurrentBlock
                           ? "0 0 30px rgba(59, 130, 246, 0.6), 0 0 60px rgba(147, 51, 234, 0.4), inset 0 0 20px rgba(255, 255, 255, 0.1)"
-                          : undefined,
+                          : isInPlanningSelection
+                            ? "0 0 15px rgba(147, 51, 234, 0.5)"
+                            : undefined,
                       }}
-                      title={`${block.startTime} - ${block.endTime}${block.task ? `: ${block.task.title}` : ""} (${blockStatus})`}
+                      title={`${block.startTime} - ${block.endTime}${block.task ? `: ${block.task.title}` : ""} (${blockStatus})${isInPlanningSelection ? " - SELECTED FOR PLANNING" : ""}`}
                     >
-                      {/* Breathing glow overlay */}
-                      {isCurrentBlock && (
-                        <div className="absolute inset-0 bg-gradient-to-br from-white/20 via-transparent to-white/10 rounded-lg animate-pulse-soft" />
-                      )}
-
-                      {/* Recently moved indicator */}
-                      {block.isRecentlyMoved && (
-                        <div className="absolute top-1 right-1 w-2 h-2 bg-orange-500 rounded-full animate-ping" />
-                      )}
-
-                      {/* Sparkle effects for current block */}
-                      {isCurrentBlock && (
-                        <>
-                          <div className="absolute top-2 right-2 w-2 h-2 bg-white rounded-full animate-ping opacity-75" />
-                          <div
-                            className="absolute bottom-2 left-2 w-1 h-1 bg-white rounded-full animate-ping opacity-60"
-                            style={{ animationDelay: "0.5s" }}
-                          />
-                        </>
-                      )}
-
-                      {/* Time label in upper left corner */}
-                      <div
-                        className={cn(
-                          "absolute top-1 left-1 text-xs font-mono transition-all duration-300",
-                          isCurrentBlock ? "text-white font-bold opacity-90" : "opacity-75",
-                        )}
-                      >
-                        {block.startTime}-{block.endTime}
-                      </div>
-
-                      {/* Block status indicator */}
-                      <div
-                        className={cn(
-                          "absolute top-1 right-8 text-xs opacity-50",
-                          blockStatus === "past"
-                            ? "text-gray-500"
-                            : blockStatus === "current"
-                              ? "text-white"
-                              : "text-blue-600",
-                        )}
-                      >
-                        {blockStatus === "past" ? "📅" : blockStatus === "current" ? "⏰" : "🔮"}
-                      </div>
-
-                      {/* Current time countdown */}
-                      {isCurrentBlock && (
-                        <div className="absolute top-1 right-1 text-xs font-bold bg-white bg-opacity-25 px-2 py-1 rounded-full backdrop-blur-sm">
-                          {getRemainingTime(block)}
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <span className={cn(
+                            isCurrentBlock 
+                              ? (blockDurationMinutes === 3 ? "text-sm" : "text-lg") + " text-white font-bold"
+                              : blockDurationMinutes === 3 ? "text-[10px] text-gray-600" : "text-xs text-gray-600"
+                          )}>
+                            {isCurrentBlock 
+                              ? getRemainingTime(block)
+                              : blockDurationMinutes === 3 ? block.startTime : `${block.startTime} - ${block.endTime}`
+                            }
+                          </span>
                         </div>
-                      )}
-
-                      {/* Task content */}
-                      <div className="mt-4 h-full flex flex-col justify-center">
-                        {block.task ? (
-                          <div className="text-center">
-                            <div
+                      </div>
+                      {block.task && (
+                        <>
+                          <div className="mt-1">
+                            <p
                               className={cn(
-                                "text-xs font-medium truncate px-1",
-                                isCurrentBlock ? "text-white font-bold" : "",
+                                blockDurationMinutes === 3 ? "text-xs font-medium truncate" : "text-sm font-medium truncate",
+                                isCurrentBlock ? "text-white" : "text-gray-900",
                               )}
                             >
                               {block.task.title}
-                            </div>
-                            {block.task.type && (
-                              <Badge
-                                className={cn(
-                                  "mt-1 text-xs",
-                                  isCurrentBlock
-                                    ? "bg-white bg-opacity-20 text-white border-white border-opacity-30"
-                                    : "",
-                                )}
-                                variant={isCurrentBlock ? "outline" : "secondary"}
-                              >
-                                {block.task.type}
-                              </Badge>
-                            )}
+                            </p>
                           </div>
-                        ) : (
-                          <div
-                            className={cn(
-                              "text-center text-xs transition-all duration-300",
-                              isCurrentBlock ? "text-white opacity-80" : "text-gray-400",
-                            )}
-                          >
-                            Click to add task
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Removed the Focus session indicator that was hiding the task */}
+                          {/* Expand Corner Indicator */}
+                          {blockStatus !== 'past' && (
+                            <div
+                              draggable
+                              onDragStart={(e) => {
+                                e.stopPropagation()
+                                handleDragStart(e, block, true)
+                              }}
+                              onDragEnd={(e) => {
+                                e.stopPropagation()
+                                handleDragEnd()
+                              }}
+                              className={cn(
+                                "absolute bottom-0 right-0 w-3 h-3 cursor-move transition-all",
+                                "border-l-4 border-t-4 border-gray-400 hover:border-purple-500",
+                                isCurrentBlock && "border-white/60 hover:border-white"
+                              )}
+                              title="Drag to expand task across multiple blocks"
+                            />
+                          )}
+                        </>
+                      )}
+                      {!block.task && (
+                        <div
+                          className={cn(
+                            "text-center transition-all duration-300",
+                            blockDurationMinutes === 3 ? "text-[10px]" : "text-xs",
+                            isCurrentBlock ? "text-white opacity-80" : "text-gray-400",
+                          )}
+                        >
+                          {blockDurationMinutes === 3 ? "+" : "Click to add task"}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )
@@ -1108,7 +1524,7 @@ export default function TimeTracker() {
               setSelectedBlock(null)
             }}
             onTaskSelect={(task) => handleTaskAssign(task, selectedBlock)}
-            blockTime={timeBlocks.find((b) => b.id === selectedBlock)}
+            blockTime={timeBlocks.find((b) => b.id === selectedBlock) || null}
           />
         )}
 
@@ -1150,13 +1566,14 @@ export default function TimeTracker() {
           initialValue={editingBlockId ? timeBlocks.find((b) => b.id === editingBlockId)?.task?.title || "" : ""}
           isEditing={!!editingBlockId && !!timeBlocks.find((b) => b.id === editingBlockId)?.task}
         />
-        {/* Progress Check Popup */}
+                {/* Progress Check Popup */}
         <ProgressCheckPopup
           isOpen={showProgressCheck}
           completedBlock={completedBlockId ? timeBlocks.find((b) => b.id === completedBlockId) : null}
           onDone={handleProgressDone}
           onStillDoing={handleProgressStillDoing}
-                        onTimeout={() => handleProgressTimeout(getCurrentBlockId(currentTime || new Date()))}
+          onTimeout={() => handleProgressTimeout(getCurrentBlockId(currentTime || new Date()))}
+          onClose={() => handleProgressTimeout(getCurrentBlockId(currentTime || new Date()))}
         />
       </div>
     </div>

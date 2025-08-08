@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { CheckCircle, Clock, AlertTriangle, Volume2 } from "lucide-react"
+import { CheckCircle, Clock, AlertTriangle, Volume2, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface ProgressCheckPopupProps {
@@ -22,6 +22,7 @@ interface ProgressCheckPopupProps {
   onDone: () => void
   onStillDoing: () => void
   onTimeout: () => void
+  onClose: () => void
 }
 
 export default function ProgressCheckPopup({
@@ -30,6 +31,7 @@ export default function ProgressCheckPopup({
   onDone,
   onStillDoing,
   onTimeout,
+  onClose,
 }: ProgressCheckPopupProps) {
   const [countdown, setCountdown] = useState(15)
   const [isUrgent, setIsUrgent] = useState(false)
@@ -101,13 +103,23 @@ export default function ProgressCheckPopup({
               <Clock className="h-5 w-5 text-blue-500" />
               <span>Block Completed!</span>
             </div>
-            <div
-              className={cn(
-                "text-lg font-mono px-3 py-1 rounded-full",
-                isUrgent ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700",
-              )}
-            >
-              {countdown}s
+            <div className="flex items-center gap-2">
+              <div
+                className={cn(
+                  "text-lg font-mono px-3 py-1 rounded-full",
+                  isUrgent ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700",
+                )}
+              >
+                {countdown}s
+              </div>
+              <Button
+                onClick={onClose}
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0 hover:bg-gray-100"
+              >
+                <X className="h-4 w-4" />
+              </Button>
             </div>
           </DialogTitle>
         </DialogHeader>
