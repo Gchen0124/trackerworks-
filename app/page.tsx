@@ -1717,7 +1717,7 @@ export default function TimeTracker() {
           </CardHeader>
           <CardContent>
             <div
-              className={`grid gap-2 max-h-[600px] overflow-y-auto p-2`}
+              className={`grid gap-2 max-h-[600px] overflow-y-auto p-2 pl-12`}
               style={{ gridTemplateColumns: `repeat(${getGridColumns()}, minmax(0, 1fr))` }}
             >
               {timeBlocks.map((block, index) => {
@@ -1786,6 +1786,18 @@ export default function TimeTracker() {
                       }}
                       title={`${block.startTime} - ${block.endTime}${block.task ? `: ${block.task.title}` : ""} (${blockStatus})${isInPlanningSelection ? " - SELECTED FOR PLANNING" : ""}`}
                     >
+                      {/* Hour label gutter on the left for the first block of each hour */}
+                      {(() => {
+                        const [hh, mm] = block.startTime.split(":").map(Number)
+                        if (mm === 0) {
+                          return (
+                            <div className="absolute -left-10 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-xs sm:text-sm select-none">
+                              {hh.toString().padStart(2, "0")}
+                            </div>
+                          )
+                        }
+                        return null
+                      })()}
                       {/* Goal tag on top of block with glassmorphism */}
                       {block.goal && (
                         <div
@@ -1809,11 +1821,15 @@ export default function TimeTracker() {
                       )}
                       <div className="flex justify-between items-start">
                         <div className="flex-1">
-                          <span className={cn(
-                            isCurrentBlock 
-                              ? (blockDurationMinutes === 3 ? "text-sm" : "text-lg") + " text-white font-bold"
-                              : blockDurationMinutes === 3 ? "text-[10px] text-gray-600" : "text-xs text-gray-600"
-                          )}>
+                          <span
+                            className={cn(
+                              isCurrentBlock
+                                ? (blockDurationMinutes === 3 ? "text-sm" : "text-lg") + " text-white font-bold"
+                                : blockDurationMinutes === 3 ? "text-[10px] text-gray-600" : "text-xs text-gray-600",
+                              // Push time text slightly down for 1-min and 3-min modes so it's not hidden by the tag
+                              (blockDurationMinutes === 1 || blockDurationMinutes === 3) ? "mt-4 inline-block" : ""
+                            )}
+                          >
                             {isCurrentBlock 
                               ? getRemainingTime(block)
                               : blockDurationMinutes === 3 ? block.startTime : `${block.startTime} - ${block.endTime}`
@@ -1823,11 +1839,19 @@ export default function TimeTracker() {
                       </div>
                       {block.task && (
                         <>
-                          <div className="mt-1">
+                          <div
+                            className={cn(
+                              "absolute left-2 right-3",
+                              // Start task text at the vertical middle so it can flow downward into bottom half
+                              "top-1/2"
+                            )}
+                          >
                             <p
                               className={cn(
-                                blockDurationMinutes === 3 ? "text-xs font-medium truncate" : "text-sm font-medium truncate",
+                                blockDurationMinutes === 3 ? "text-xs font-medium" : "text-sm font-medium",
                                 (isCurrentBlock || isInPlanningSelection || (blockStatus === 'future' && !!block.task)) ? "text-white" : "text-gray-900",
+                                // Allow multi-line wrap and tighter leading
+                                "leading-snug break-words"
                               )}
                             >
                               {block.task.title}
@@ -1846,7 +1870,7 @@ export default function TimeTracker() {
                                 handleDragEnd()
                               }}
                               className={cn(
-                                "absolute bottom-0 right-0 w-3 h-3 cursor-move transition-all",
+                                "absolute bottom-0 right-0 w-3 h-3 cursor-move transition-all z-10",
                                 "border-l-4 border-t-4 border-gray-400 hover:border-purple-500",
                                 isCurrentBlock && "border-white/60 hover:border-white"
                               )}
