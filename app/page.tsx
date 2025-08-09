@@ -1864,9 +1864,22 @@ export default function TimeTracker() {
                       }}
                       title={`${block.startTime} - ${block.endTime}${block.task ? `: ${block.task.title}` : ""} (${blockStatus})${isInPlanningSelection ? " - SELECTED FOR PLANNING" : ""}`}
                     >
-                      {/* Hour label gutter on the left for the first block of each hour */}
+                      {/* Hour/row label gutter on the left */}
                       {(() => {
                         const [hh, mm] = block.startTime.split(":").map(Number)
+                        // For 1-minute mode: label each 10-minute row as HH.1..HH.6
+                        if (blockDurationMinutes === 1) {
+                          if (mm % 10 === 0) {
+                            const segment = Math.floor(mm / 10) + 1 // 0->1,10->2,...,50->6
+                            return (
+                              <div className="absolute -left-12 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-[10px] sm:text-xs select-none">
+                                {`${hh.toString().padStart(2, "0")}.${segment}`}
+                              </div>
+                            )
+                          }
+                          return null
+                        }
+                        // Other modes: show plain hour on the first minute of the hour
                         if (mm === 0) {
                           return (
                             <div className="absolute -left-10 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-xs sm:text-sm select-none">

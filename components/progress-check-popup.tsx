@@ -40,6 +40,11 @@ export default function ProgressCheckPopup({
 }: ProgressCheckPopupProps) {
   const [countdown, setCountdown] = useState(15)
   const [isUrgent, setIsUrgent] = useState(false)
+  // Refs to avoid stale closure in async callbacks
+  const isOpenRef = useRef(isOpen)
+  const countdownRef = useRef(countdown)
+  useEffect(() => { isOpenRef.current = isOpen }, [isOpen])
+  useEffect(() => { countdownRef.current = countdown }, [countdown])
 
   // Debug logging
   useEffect(() => {
@@ -65,6 +70,9 @@ export default function ProgressCheckPopup({
         if (prev <= 1) {
           // Call the latest onTimeout without recreating the interval
           onTimeoutRef.current()
+          // Immediately mark session inactive and stop mic to avoid drift
+          sessionActiveRef.current = false
+          try { stopRecognition() } catch (_) {}
           return 0
         }
 
@@ -112,7 +120,7 @@ export default function ProgressCheckPopup({
       utterance.rate = 0.9
       utterance.onend = () => {
         // After TTS finishes, resume listening if popup is still active
-        if (isOpen && countdown > 0 && !decisionMadeRef.current) {
+        if (isOpenRef.current && countdownRef.current > 0 && !decisionMadeRef.current && sessionActiveRef.current) {
           // slight delay to allow audio device handoff
           setTimeout(() => startRecognition(), 120)
         }
@@ -291,11 +299,11 @@ export default function ProgressCheckPopup({
           setIsListening(false)
           return
         }
-        if (isOpen && countdown > 0 && !decisionMadeRef.current && sessionActiveRef.current) {
+        if (isOpenRef.current && countdownRef.current > 0 && !decisionMadeRef.current && sessionActiveRef.current) {
           try {
             console.debug("[Voice] Recognition ended, restarting...")
             setTimeout(() => {
-              if (mySessionId === sessionIdRef.current && sessionActiveRef.current && !decisionMadeRef.current) {
+              if (mySessionId === sessionIdRef.current && sessionActiveRef.current && !decisionMadeRef.current && isOpenRef.current && countdownRef.current > 0) {
                 startRecognition()
               }
             }, 200)
@@ -380,7 +388,7 @@ export default function ProgressCheckPopup({
         const startAfterTTS = () => {
           // If no TTS support, just start
           if (!("speechSynthesis" in window)) {
-            if (isOpen && countdown > 0 && !decisionMadeRef.current) startRecognition()
+            if (isOpenRef.current && countdownRef.current > 0 && !decisionMadeRef.current && sessionActiveRef.current) startRecognition()
             return
           }
           // Wait until speech synthesis is not speaking
@@ -394,7 +402,7 @@ export default function ProgressCheckPopup({
             }
             if (!speaking || waited >= maxWaitMs) {
               clearInterval(iv)
-              if (isOpen && countdown > 0 && !decisionMadeRef.current) {
+              if (isOpenRef.current && countdownRef.current > 0 && !decisionMadeRef.current && sessionActiveRef.current) {
                 // slight delay to allow audio device handoff from TTS
                 console.debug("[Voice] TTS finished or max wait reached, starting recognition soon")
                 setTimeout(() => startRecognition(), 120)
@@ -415,7 +423,7 @@ export default function ProgressCheckPopup({
     }
     return () => {
       // Cleanup on unmount/effect change
-      if (!isOpen || countdown === 0) {
+      if (!isOpenRef.current || countdownRef.current === 0) {
         sessionActiveRef.current = false
         stopRecognition()
       }
