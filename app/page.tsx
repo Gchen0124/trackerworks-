@@ -445,20 +445,97 @@ export default function TimeTracker() {
     return `${hour}-${minute}`
   }
 
-  const getBlockTimeStatus = (blockId: string) => {
+  // Determine whether a block id is past/current/future relative to now
+  const getBlockTimeStatus = (blockId: string): 'past' | 'current' | 'future' => {
     const now = new Date()
-    const currentBlockId = getCurrentBlockId(now)
-    const [hour, minute] = blockId.split("-").map(Number)
-    const blockTime = new Date()
-    blockTime.setHours(hour, minute, 0, 0)
-
-    if (blockId === currentBlockId) return "current"
-    if (blockTime < now) return "past"
-    return "future"
+    const currentId = getCurrentBlockId(now)
+    if (blockId === currentId) return 'current'
+    const [h1, m1] = blockId.split('-').map(Number)
+    const [h2, m2] = currentId.split('-').map(Number)
+    const t1 = h1 * 60 + m1
+    const t2 = h2 * 60 + m2
+    return t1 < t2 ? 'past' : 'future'
   }
 
+  // Index of a block id within today's timeBlocks array
   const getBlockIndex = (blockId: string) => {
     return timeBlocks.findIndex((block) => block.id === blockId)
+  }
+
+  // Export today's blocks as CSV (temporary solution before DB)
+  const exportTodayCsv = () => {
+    try {
+      const toMinutes = (hhmm: string) => {
+        const [h, m] = hhmm.split(':').map(Number)
+        return h * 60 + m
+      }
+      const csvEscape = (value: unknown) => {
+        const s = (value ?? '').toString()
+        if (s.includes('"') || s.includes(',') || s.includes('\n')) {
+          return '"' + s.replace(/"/g, '""') + '"'
+        }
+        return s
+      }
+
+      const today = new Date()
+      const ymd = today.toISOString().slice(0, 10)
+
+      const headers = [
+        'date',
+        'start_time',
+        'end_time',
+        'duration_min',
+        'status',
+        'task_title',
+        'task_type',
+        'task_color',
+        'goal_label',
+        'goal_color',
+        'is_active',
+        'is_completed',
+      ]
+
+      const rows = timeBlocks.map((b) => {
+        const duration = toMinutes(b.endTime) - toMinutes(b.startTime)
+        const status = getBlockTimeStatus(b.id)
+        const taskTitle = b.task?.title ?? ''
+        const taskType = (b as any).task?.type ?? ''
+        const taskColor = b.task?.color ?? ''
+        const goalLabel = b.goal?.label ?? ''
+        const goalColor = b.goal?.color ?? ''
+        const isActive = (b as any).isActive ? '1' : '0'
+        const isCompleted = (b as any).isCompleted ? '1' : '0'
+        return [
+          ymd,
+          b.startTime,
+          b.endTime,
+          duration,
+          status,
+          taskTitle,
+          taskType,
+          taskColor,
+          goalLabel,
+          goalColor,
+          isActive,
+          isCompleted,
+        ].map(csvEscape).join(',')
+      })
+
+      const csv = [headers.join(','), ...rows].join('\n')
+      // Prepend UTF-8 BOM to ensure Excel renders non-ASCII (e.g., Chinese) correctly
+      const csvWithBom = '\uFEFF' + csv
+      const blob = new Blob([csvWithBom], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `trackerworks-${ymd}.csv`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      console.error('CSV export failed', e)
+    }
   }
 
   // ===== Multi-select helpers =====
@@ -1682,6 +1759,7 @@ export default function TimeTracker() {
                 24-Hour Time Grid ({blockDurationMinutes}-minute blocks)
               </span>
               <div className="flex items-center gap-2">
+                <Button variant="outline" className="h-8" onClick={exportTodayCsv}>Export CSV</Button>
                 {planningMode.isActive && (
                   <Badge className="bg-purple-500 text-white animate-pulse">
                     Selecting {planningMode.selectedBlocks.length} blocks for planning
@@ -1802,21 +1880,15 @@ export default function TimeTracker() {
                       {block.goal && (
                         <div
                           className={cn(
-                            "absolute -top-2 left-2 px-2 py-0.5 rounded-full text-[10px] sm:text-xs",
-                            "border border-white/30 bg-white/30 backdrop-blur-md shadow-md",
-                            "flex items-center gap-1"
+                            "absolute -top-2 left-2 px-3 py-1 rounded-md shadow-md",
+                            // Stronger, more visible goal tag backgrounds by goal id
+                            block.goal.id === 'goal_1' && 'bg-amber-500',
+                            block.goal.id === 'goal_2' && 'bg-emerald-500',
+                            block.goal.id === 'goal_3' && 'bg-indigo-500'
                           )}
                           title={`Assigned Goal: ${block.goal.label}`}
                         >
-                          <span
-                            className={cn(
-                              "inline-block h-2 w-2 rounded-full",
-                              block.goal.id === 'goal_1' && 'bg-amber-400',
-                              block.goal.id === 'goal_2' && 'bg-emerald-400',
-                              block.goal.id === 'goal_3' && 'bg-indigo-400'
-                            )}
-                          />
-                          <span className="text-zinc-900 drop-shadow-sm">{block.goal.label}</span>
+                          <span className="text-white text-xs sm:text-sm font-semibold tracking-wide drop-shadow">{block.goal.label}</span>
                         </div>
                       )}
                       <div className="flex justify-between items-start">
@@ -1826,8 +1898,11 @@ export default function TimeTracker() {
                               isCurrentBlock
                                 ? (blockDurationMinutes === 3 ? "text-sm" : "text-lg") + " text-white font-bold"
                                 : blockDurationMinutes === 3 ? "text-[10px] text-gray-600" : "text-xs text-gray-600",
-                              // Push time text slightly down for 1-min and 3-min modes so it's not hidden by the tag
-                              (blockDurationMinutes === 1 || blockDurationMinutes === 3) ? "mt-4 inline-block" : ""
+                              // Make future blocks with a task show white time text for visibility
+                              (!isCurrentBlock && blockStatus === 'future' && !!block.task) ? 'text-white' : '',
+                              // Push time text down: default a bit lower; even more for 1- and 3-minute modes
+                              'inline-block',
+                              (blockDurationMinutes === 1 || blockDurationMinutes === 3) ? 'mt-5' : 'mt-2'
                             )}
                           >
                             {isCurrentBlock 
