@@ -87,6 +87,7 @@ export default function ProgressCheckPopup({
   const audioStreamRef = useRef<MediaStream | null>(null)
   const hasInitiatedListeningRef = useRef(false)
   const sessionActiveRef = useRef(false)
+  const sessionIdRef = useRef(0)
   const intentionalStopRef = useRef(false)
   const recognitionStartingRef = useRef(false)
   const lastStartAtRef = useRef<number>(0)
@@ -220,7 +221,12 @@ export default function ProgressCheckPopup({
         rec.onresult = null
         rec.onend = null
         rec.onerror = null
-        rec.stop()
+        if (typeof rec.abort === "function") {
+          // Abort to minimize final callbacks; Chrome fires 'aborted' which we'll ignore when inactive
+          rec.abort()
+        } else {
+          rec.stop()
+        }
       }
     } catch (_) {
       // no-op
@@ -260,19 +266,24 @@ export default function ProgressCheckPopup({
       recognition.continuous = true
       recognition.maxAlternatives = 1
 
+      const mySessionId = sessionIdRef.current
+
       recognition.onresult = (event: any) => {
+        if (mySessionId !== sessionIdRef.current || !sessionActiveRef.current) return
         const lastIdx = event.results.length - 1
         const transcript = event.results[lastIdx][0].transcript || ""
         handleTranscript(transcript)
       }
 
       recognition.onstart = () => {
+        if (mySessionId !== sessionIdRef.current || !sessionActiveRef.current) return
         console.debug("[Voice] Recognition started")
         setIsListening(true)
         recognitionStartingRef.current = false
       }
 
       recognition.onend = () => {
+        if (mySessionId !== sessionIdRef.current) return
         // Some browsers auto-end; restart if still within window and no decision
         if (intentionalStopRef.current) {
           console.debug("[Voice] Recognition ended intentionally; not restarting")
@@ -284,7 +295,7 @@ export default function ProgressCheckPopup({
           try {
             console.debug("[Voice] Recognition ended, restarting...")
             setTimeout(() => {
-              if (sessionActiveRef.current && !decisionMadeRef.current) {
+              if (mySessionId === sessionIdRef.current && sessionActiveRef.current && !decisionMadeRef.current) {
                 startRecognition()
               }
             }, 200)
@@ -298,10 +309,17 @@ export default function ProgressCheckPopup({
       }
 
       recognition.onerror = (_e: any) => {
-        // On error, stop listening to avoid loops
-        console.warn("[Voice] Recognition error", _e)
-        // Ignore benign aborted events (often fired when we intentionally stop)
+        // Ignore late or inactive-session errors
         const code = (_e && (_e.error || _e.name)) || ""
+        if (mySessionId !== sessionIdRef.current || !sessionActiveRef.current || !isOpen) {
+          if (code === "aborted") {
+            // common during intentional abort/stop after close
+            return
+          }
+          return
+        }
+        // On active session, log once and handle
+        console.warn("[Voice] Recognition error", _e)
         if (code === "aborted") {
           // If we didn't intend to stop, schedule a gentle restart
           if (!intentionalStopRef.current && sessionActiveRef.current) {
@@ -342,6 +360,7 @@ export default function ProgressCheckPopup({
       decisionMadeRef.current = false
       hasInitiatedListeningRef.current = false
       sessionActiveRef.current = false
+      try { (window as any).speechSynthesis?.cancel?.() } catch (_) {}
       stopRecognition()
       return
     }
@@ -352,6 +371,7 @@ export default function ProgressCheckPopup({
       intentionalStopRef.current = false
       recognitionStartingRef.current = false
       lastStartAtRef.current = 0
+      sessionIdRef.current += 1
 
       sessionActiveRef.current = true
       hasInitiatedListeningRef.current = true
