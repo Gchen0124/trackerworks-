@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -79,6 +79,9 @@ export default function TimeTracker() {
   const [isTimerRunning, setIsTimerRunning] = useState(false)
   const [currentTask, setCurrentTask] = useState<any>(null)
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([])
+  // Keep a snapshot of previous grid to help remap when duration changes
+  const prevBlocksRef = useRef<TimeBlock[]>([])
+  const prevDurationRef = useRef<number>(10)
   const [selectedBlock, setSelectedBlock] = useState<string | null>(null)
   const [showTaskSelector, setShowTaskSelector] = useState(false)
   const [showVoiceInterface, setShowVoiceInterface] = useState(false)
@@ -131,7 +134,6 @@ export default function TimeTracker() {
     { value: 5, label: "5 min", description: "288 blocks/day - Ultra detailed" },
     { value: 10, label: "10 min", description: "144 blocks/day - Detailed" },
     { value: 15, label: "15 min", description: "96 blocks/day - Standard" },
-    { value: 20, label: "20 min", description: "72 blocks/day - Focused" },
     { value: 30, label: "30 min", description: "48 blocks/day - High level" },
   ]
 
@@ -269,6 +271,43 @@ export default function TimeTracker() {
         }
       }
     })
+
+    // If we just changed from 30-minute mode to a smaller mode, propagate tasks/goals
+    try {
+      const prevDuration = prevDurationRef.current
+      if (prevDuration === 30 && blockDurationMinutes < 30 && prevBlocksRef.current.length) {
+        // Helper to convert HH:MM to minutes from midnight
+        const toMin = (hhmm: string) => {
+          const [h, m] = hhmm.split(":").map(Number)
+          return h * 60 + m
+        }
+        // Build quick index of new blocks' start minutes
+        const newStarts = blocks.map((b) => toMin(b.startTime))
+
+        for (const prev of prevBlocksRef.current) {
+          const pStart = toMin(prev.startTime)
+          const pEnd = toMin(prev.endTime)
+          const hasContent = !!prev.task || !!prev.goal
+          if (!hasContent) continue
+          for (let i = 0; i < blocks.length; i++) {
+            const ns = newStarts[i]
+            // Fill blocks whose start lies within the previous 30-min window
+            if (ns >= pStart && ns < pEnd) {
+              if (!blocks[i].task) {
+                if (prev.task) {
+                  blocks[i].task = { ...prev.task }
+                }
+              }
+              if (!blocks[i].goal && prev.goal) {
+                blocks[i].goal = { ...prev.goal }
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Remap from 30-min to smaller failed:", e)
+    }
 
     console.log("Generated time blocks:", blocks.length, "blocks")
     setTimeBlocks(blocks)
@@ -1140,6 +1179,9 @@ export default function TimeTracker() {
   }
 
   const handleBlockDurationChange = (newDuration: number) => {
+    // Snapshot current layout before switching
+    prevBlocksRef.current = timeBlocks
+    prevDurationRef.current = blockDurationMinutes
     setBlockDurationMinutes(newDuration)
     setShowDurationSelector(false)
     // Clear any existing tasks when changing duration to avoid confusion
@@ -1148,7 +1190,8 @@ export default function TimeTracker() {
 
   // Calculate grid columns based on block duration for better layout
   const getGridColumns = () => {
-    // For 3-minute blocks, use exactly 10 columns as requested
+    // For 1-minute and 3-minute blocks, use exactly 10 columns as requested
+    if (blockDurationMinutes === 1) return 10
     if (blockDurationMinutes === 3) return 10
     
     const blocksPerHour = 60 / blockDurationMinutes
