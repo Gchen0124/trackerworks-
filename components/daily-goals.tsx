@@ -68,7 +68,12 @@ export default function DailyGoals() {
 
     // Prefer Notion; if fails, fall back to local
     try {
-      const res = await fetch(`/api/goals?date=${dateStr}`)
+      // 1) Try local DB first
+      let res = await fetch(`/api/local/goals?date=${dateStr}`)
+      if (!res.ok) {
+        // 2) Fallback to Notion-backed API
+        res = await fetch(`/api/goals?date=${dateStr}`)
+      }
       if (!res.ok) throw new Error("Failed to load goals from Notion")
       const data: GoalsResponse = await res.json()
 
@@ -84,7 +89,7 @@ export default function DailyGoals() {
       }
       setWeeklyGoal(filled.weeklyGoal)
       setGoals(filled.goals)
-      setSource("notion")
+      setSource((data as any)?.source === 'local' ? 'local' : 'notion')
       setExcitingGoal(filled.excitingGoal || "")
       setEoyGoal(filled.eoyGoal || "")
       setMonthlyGoal(filled.monthlyGoal || "")
@@ -138,6 +143,14 @@ export default function DailyGoals() {
     saveToLocal(snapshot)
     // Also broadcast on each local edit
     try { window.dispatchEvent(new CustomEvent('dailyGoalsUpdated', { detail: snapshot })) } catch {}
+    // Best-effort persist to local DB
+    try {
+      fetch('/api/local/goals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(snapshot),
+      }).catch(() => {})
+    } catch {}
   }, [weeklyGoal, goals, dateStr, source, loading, excitingGoal, eoyGoal, monthlyGoal])
 
   const glassClass =
