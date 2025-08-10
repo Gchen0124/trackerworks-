@@ -13,20 +13,3 @@ if (!fs.existsSync(dir)) {
 
 export const sqlite = new Database(defaultPath)
 export const db = drizzle(sqlite)
-
-// Best-effort bootstrap: create goals table if it doesn't exist (for local dev)
-sqlite.exec(`
-CREATE TABLE IF NOT EXISTS goals (
-  date TEXT PRIMARY KEY,
-  weekly_goal TEXT,
-  goal1 TEXT,
-  goal2 TEXT,
-  goal3 TEXT,
-  exciting_goal TEXT,
-  eoy_goal TEXT,
-  monthly_goal TEXT,
-  source TEXT,
-  created_at INTEGER DEFAULT (strftime('%s','now')*1000),
-  updated_at INTEGER DEFAULT (strftime('%s','now')*1000)
-);
-`)
