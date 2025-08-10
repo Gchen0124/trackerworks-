@@ -26,8 +26,11 @@ interface ProgressCheckPopupProps {
   } | null
   onDone: () => void
   onStillDoing: (overrideTitle?: string) => void
+  onStickToPlan: () => void
   onTimeout: () => void
   onClose: () => void
+  isCurrentPinned?: boolean
+  currentPinnedTaskTitle?: string
 }
 
 export default function ProgressCheckPopup({
@@ -35,8 +38,11 @@ export default function ProgressCheckPopup({
   completedBlock,
   onDone,
   onStillDoing,
+  onStickToPlan,
   onTimeout,
   onClose,
+  isCurrentPinned = false,
+  currentPinnedTaskTitle,
 }: ProgressCheckPopupProps) {
   const [countdown, setCountdown] = useState(15)
   const [isUrgent, setIsUrgent] = useState(false)
@@ -188,6 +194,15 @@ export default function ProgressCheckPopup({
       "carry on",
     ]
 
+    // If user wants to stick to plan (when current is pinned)
+    const stickPhrases = [
+      "stick to plan",
+      "follow the plan",
+      "do planned task",
+      "do the planned task",
+      "go with the plan",
+    ]
+
     // Pattern: "I did <something> instead"
     const insteadMatch = text.match(/^(?:i\s+(?:have\s+)?did|i\s+did|i\'ve\s+done|i\s+did\s+do)\s+(.+?)\s+instead\.?$/i) ||
       text.match(/\b(i\s+did)\s+(.+?)\s+instead\b/i)
@@ -205,6 +220,7 @@ export default function ProgressCheckPopup({
     // Basic contains matching
     const saysDone = donePhrases.some((p) => text.includes(p))
     const saysContinue = continuePhrases.some((p) => text.includes(p))
+    const saysStick = stickPhrases.some((p) => text.includes(p))
 
     if (saysDone && !decisionMadeRef.current) {
       decisionMadeRef.current = true
@@ -216,6 +232,12 @@ export default function ProgressCheckPopup({
       decisionMadeRef.current = true
       stopRecognition()
       onStillDoing()
+      return
+    }
+    if (isCurrentPinned && saysStick && !decisionMadeRef.current) {
+      decisionMadeRef.current = true
+      stopRecognition()
+      onStickToPlan()
       return
     }
   }
@@ -505,11 +527,30 @@ export default function ProgressCheckPopup({
           {/* Progress Question */}
           <div className="text-center">
             <h3 className="text-lg font-medium text-gray-900 mb-2">How did you do?</h3>
-            <p className="text-sm text-gray-600">Choose your progress to continue with the next block</p>
+            <p className="text-sm text-gray-600">
+              Choose your progress to continue with the next block
+              {isCurrentPinned && currentPinnedTaskTitle ? (
+                <>
+                  <br />
+                  <span className="text-xs text-blue-600">
+                    Upcoming is pinned: {currentPinnedTaskTitle}
+                  </span>
+                </>
+              ) : null}
+            </p>
           </div>
 
           {/* Action Buttons */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className={cn("grid gap-3", isCurrentPinned ? "grid-cols-3" : "grid-cols-2")}>
+            {isCurrentPinned && (
+              <Button onClick={onStickToPlan} className="flex flex-col items-center gap-2 h-20 bg-sky-500 hover:bg-sky-600">
+                <CheckCircle className="h-6 w-6" />
+                <div className="text-center">
+                  <div className="font-medium">Not done, but stick to plan!</div>
+                  <div className="text-xs opacity-90">Do planned task; defer previous</div>
+                </div>
+              </Button>
+            )}
             <Button onClick={onDone} className="flex flex-col items-center gap-2 h-20 bg-green-500 hover:bg-green-600">
               <CheckCircle className="h-6 w-6" />
               <div className="text-center">
@@ -561,7 +602,7 @@ export default function ProgressCheckPopup({
                         ? `${completedBlock.goal.label} : ${completedBlock.task.title}`
                         : completedBlock.task.title
                       : "your task"
-                  }?`,
+                  }?${isCurrentPinned && currentPinnedTaskTitle ? ` You determined to do ${currentPinnedTaskTitle} for now.` : ""}`,
                 )
               }
               className="text-xs text-gray-500 hover:text-gray-700"

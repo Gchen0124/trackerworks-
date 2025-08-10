@@ -699,7 +699,11 @@ export default function TimeTracker() {
     setMultiSelect((prev) => ({ ...prev, selected: [], lastAnchorId: null }))
   }
 
-  const pushTasksForward = (fromBlockIndex: number, offset: number = 1) => {
+  const pushTasksForward = (
+    fromBlockIndex: number,
+    offset: number = 1,
+    options?: { forceMovePinnedAtIndices?: Set<number> }
+  ) => {
     const affectedBlocks: string[] = []
     const updatedBlocks = [...timeBlocks]
 
@@ -709,8 +713,8 @@ export default function TimeTracker() {
     for (let i = fromBlockIndex; i < updatedBlocks.length; i++) {
       const blk = updatedBlocks[i]
       if (blk.task) {
-        // Do not move pinned blocks; leave them as-is
-        if (blk.isPinned) continue
+        // Do not move pinned blocks unless explicitly forced for this index
+        if (blk.isPinned && !(options?.forceMovePinnedAtIndices?.has(i))) continue
         tasksToMove.push({ task: blk.task, originalIndex: i })
         blk.task = undefined // Clear the original position for movable tasks only
       }
@@ -1354,7 +1358,14 @@ export default function TimeTracker() {
     const now = new Date()
     const timeString = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     const taskName = completedBlock.task?.title || "time block"
-    speakTimeAlert(`Time block completed. Current time is ${timeString}. How did you do with ${taskName}?`)
+    // If upcoming block is pinned with a task, append the announcement
+    const nextBlk = timeBlocks.find((b) => b.id === nextBlockId)
+    const nextIsPinned = !!(nextBlk?.isPinned && nextBlk?.task)
+    const nextTaskName = nextBlk?.task
+      ? (nextBlk.goal?.label ? `${nextBlk.goal.label} : ${nextBlk.task.title}` : nextBlk.task.title)
+      : undefined
+    const extra = nextIsPinned && nextTaskName ? ` You determined to do ${nextTaskName} for now.` : ""
+    speakTimeAlert(`Time block completed. Current time is ${timeString}. How did you do with ${taskName}?${extra}`)
 
     // Show progress check popup
     setCompletedBlockId(completedBlock.id)
@@ -1383,6 +1394,46 @@ export default function TimeTracker() {
     )
   }
 
+  // When current block is pinned: user wants to stick to the plan (do the pinned task now),
+  // and delay the just-completed block's task to the next available non-pinned empty slot
+  const handleProgressStickToPlan = () => {
+    if (progressCheckTimer) clearTimeout(progressCheckTimer)
+    if (!completedBlockId) return
+
+    const currentId = getCurrentBlockId(currentTime || new Date())
+    const currentIndex = getBlockIndex(currentId)
+    const completedIndex = getBlockIndex(completedBlockId)
+    const updated = [...timeBlocks]
+
+    const completedTask = updated[completedIndex]?.task
+    // Move the completed task to the next available non-pinned empty slot after the current block
+    if (completedTask) {
+      // Clear original (the past block) to reflect it was deferred
+      updated[completedIndex].task = undefined
+      let place = currentIndex + 1
+      while (place < updated.length && (updated[place].isPinned || updated[place].task)) {
+        place++
+      }
+      if (place < updated.length) {
+        updated[place].task = { ...completedTask, id: `deferred-${Date.now()}` }
+        updated[place].isRecentlyMoved = true
+      }
+    }
+
+    setTimeBlocks(updated)
+
+    // Start next block (pinned planned task) normally
+    setIsTimerRunning(true)
+    setTimerSeconds(0)
+    setTimeBlocks((prev) =>
+      prev.map((block) => (block.id === currentId ? { ...block, isActive: true } : { ...block, isActive: false })),
+    )
+
+    setShowProgressCheck(false)
+    setCompletedBlockId(null)
+    setProgressCheckTimer(null)
+  }
+
   const handleProgressStillDoing = (overrideTitle?: string) => {
     if (progressCheckTimer) clearTimeout(progressCheckTimer)
     if (!completedBlockId) return
@@ -1395,7 +1446,12 @@ export default function TimeTracker() {
     const currentBlockIndex = getBlockIndex(currentBlockId)
     const completedBlockIndex = getBlockIndex(completedBlockId)
 
-    const { updatedBlocks } = pushTasksForward(currentBlockIndex)
+    let { updatedBlocks } = pushTasksForward(
+      currentBlockIndex,
+      1,
+      // If current block is pinned, allow moving that specific pinned block forward
+      timeBlocks[currentBlockIndex]?.isPinned ? { forceMovePinnedAtIndices: new Set([currentBlockIndex]) } : undefined
+    )
 
     // If user said "I did <something> instead", rename the just completed block's task
     if (overrideTitle && completedBlockIndex >= 0 && updatedBlocks[completedBlockIndex]?.task) {
@@ -2110,8 +2166,20 @@ export default function TimeTracker() {
             })()}
             onDone={handleProgressDone}
             onStillDoing={handleProgressStillDoing}
+            onStickToPlan={handleProgressStickToPlan}
             onTimeout={() => handleProgressTimeout(getCurrentBlockId(currentTime || new Date()))}
             onClose={() => handleProgressTimeout(getCurrentBlockId(currentTime || new Date()))}
+            isCurrentPinned={(() => {
+              const currId = getCurrentBlockId(currentTime || new Date())
+              const blk = timeBlocks.find((b) => b.id === currId)
+              return !!(blk?.isPinned && blk?.task)
+            })()}
+            currentPinnedTaskTitle={(() => {
+              const currId = getCurrentBlockId(currentTime || new Date())
+              const blk = timeBlocks.find((b) => b.id === currId)
+              if (!blk?.task) return undefined
+              return blk.goal?.label ? `${blk.goal.label} : ${blk.task.title}` : blk.task.title
+            })()}
           />
         )}
       </div>
