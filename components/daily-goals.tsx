@@ -14,6 +14,10 @@ interface GoalsResponse {
   goals: string[] // [g1,g2,g3]
   pageId?: string
   source: "notion" | "local"
+  // New high-level goals (local-first; Notion optional)
+  excitingGoal?: string
+  eoyGoal?: string
+  monthlyGoal?: string
 }
 
 function todayKey(dateStr?: string) {
@@ -32,6 +36,10 @@ export default function DailyGoals() {
   const [tcLoading, setTcLoading] = useState(false)
   const [tcItems, setTcItems] = useState<Array<{ id: string; title: string; url?: string; lastEdited?: string }>>([])
   const [tcSearch, setTcSearch] = useState("")
+  // New high-level goals state
+  const [excitingGoal, setExcitingGoal] = useState("")
+  const [eoyGoal, setEoyGoal] = useState("")
+  const [monthlyGoal, setMonthlyGoal] = useState("")
 
   const storageKey = useMemo(() => todayKey(dateStr), [dateStr])
 
@@ -70,10 +78,16 @@ export default function DailyGoals() {
         goals: [data.goals?.[0] || "", data.goals?.[1] || "", data.goals?.[2] || ""],
         pageId: data.pageId,
         source: "notion",
+        excitingGoal: (data as any)?.excitingGoal || "",
+        eoyGoal: (data as any)?.eoyGoal || "",
+        monthlyGoal: (data as any)?.monthlyGoal || "",
       }
       setWeeklyGoal(filled.weeklyGoal)
       setGoals(filled.goals)
       setSource("notion")
+      setExcitingGoal(filled.excitingGoal || "")
+      setEoyGoal(filled.eoyGoal || "")
+      setMonthlyGoal(filled.monthlyGoal || "")
       // Notify listeners immediately
       try { window.dispatchEvent(new CustomEvent('dailyGoalsUpdated', { detail: filled })) } catch {}
 
@@ -85,11 +99,17 @@ export default function DailyGoals() {
         setWeeklyGoal(local.weeklyGoal || "")
         setGoals([local.goals?.[0] || "", local.goals?.[1] || "", local.goals?.[2] || ""])
         setSource("local")
+        setExcitingGoal(local.excitingGoal || "")
+        setEoyGoal(local.eoyGoal || "")
+        setMonthlyGoal(local.monthlyGoal || "")
         try { window.dispatchEvent(new CustomEvent('dailyGoalsUpdated', { detail: local })) } catch {}
       } else {
         // empty state: let user type manually
         setWeeklyGoal("")
         setGoals(["", "", ""]) 
+        setExcitingGoal("")
+        setEoyGoal("")
+        setMonthlyGoal("")
         setSource("local")
         setError(e?.message || "Unable to load goals")
       }
@@ -111,11 +131,14 @@ export default function DailyGoals() {
       weeklyGoal,
       goals,
       source,
+      excitingGoal,
+      eoyGoal,
+      monthlyGoal,
     }
     saveToLocal(snapshot)
     // Also broadcast on each local edit
     try { window.dispatchEvent(new CustomEvent('dailyGoalsUpdated', { detail: snapshot })) } catch {}
-  }, [weeklyGoal, goals, dateStr, source, loading])
+  }, [weeklyGoal, goals, dateStr, source, loading, excitingGoal, eoyGoal, monthlyGoal])
 
   const glassClass =
     "relative overflow-hidden rounded-2xl border border-white/20 bg-gradient-to-br from-white/20 to-white/5 " +
@@ -152,6 +175,12 @@ export default function DailyGoals() {
     if (pickerOpenFor === null) return
     if (pickerOpenFor === -1) {
       setWeeklyGoal(title)
+    } else if (pickerOpenFor === -2) {
+      setExcitingGoal(title)
+    } else if (pickerOpenFor === -3) {
+      setEoyGoal(title)
+    } else if (pickerOpenFor === -4) {
+      setMonthlyGoal(title)
     } else {
       const next = [...goals]
       next[pickerOpenFor] = title
@@ -178,6 +207,75 @@ export default function DailyGoals() {
             <Button size="sm" variant="outline" className="bg-white/30 border-white/40 text-zinc-700 hover:bg-white/50" onClick={fetchGoals} disabled={loading}>
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </Button>
+          </div>
+        </div>
+
+        {/* High-level Goals: Exciting / EOY / Monthly */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+          {/* Exciting Goal */}
+          <div className="space-y-1">
+            <div className={labelCls}>Exciting Goal</div>
+            <div className="flex items-center gap-2">
+              <Input
+                value={excitingGoal}
+                onChange={(e) => setExcitingGoal(e.target.value)}
+                placeholder="What would be exciting to achieve?"
+                className="bg-white/40 border-white/40 text-zinc-800 placeholder:text-zinc-500 flex-1"
+              />
+              <Button
+                size="icon"
+                variant="outline"
+                className="bg-white/30 border-white/40 text-zinc-700 hover:bg-white/50"
+                onClick={() => openPicker(-2)}
+                title="Pick from Task Calendar"
+              >
+                <Database className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          {/* EOY Goal */}
+          <div className="space-y-1">
+            <div className={labelCls}>EOY goal</div>
+            <div className="flex items-center gap-2">
+              <Input
+                value={eoyGoal}
+                onChange={(e) => setEoyGoal(e.target.value)}
+                placeholder="What do you want by end of year?"
+                className="bg-white/40 border-white/40 text-zinc-800 placeholder:text-zinc-500 flex-1"
+              />
+              <Button
+                size="icon"
+                variant="outline"
+                className="bg-white/30 border-white/40 text-zinc-700 hover:bg-white/50"
+                onClick={() => openPicker(-3)}
+                title="Pick from Task Calendar"
+              >
+                <Database className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          {/* Monthly Goal */}
+          <div className="space-y-1">
+            <div className={labelCls}>Monthly goal</div>
+            <div className="flex items-center gap-2">
+              <Input
+                value={monthlyGoal}
+                onChange={(e) => setMonthlyGoal(e.target.value)}
+                placeholder="What will you accomplish this month?"
+                className="bg-white/40 border-white/40 text-zinc-800 placeholder:text-zinc-500 flex-1"
+              />
+              <Button
+                size="icon"
+                variant="outline"
+                className="bg-white/30 border-white/40 text-zinc-700 hover:bg-white/50"
+                onClick={() => openPicker(-4)}
+                title="Pick from Task Calendar"
+              >
+                <Database className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -239,7 +337,15 @@ export default function DailyGoals() {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Database className="h-5 w-5" /> Select Task for Goal {pickerOpenFor !== null ? pickerOpenFor + 1 : ""}
+              <Database className="h-5 w-5" /> 
+              {(() => {
+                if (pickerOpenFor === -2) return "Select Task for Exciting Goal"
+                if (pickerOpenFor === -3) return "Select Task for EOY goal"
+                if (pickerOpenFor === -4) return "Select Task for Monthly goal"
+                if (pickerOpenFor === -1) return "Select Task for Weekly Goal"
+                if (pickerOpenFor !== null) return `Select Task for Goal ${pickerOpenFor + 1}`
+                return "Select Task"
+              })()}
             </DialogTitle>
           </DialogHeader>
 
