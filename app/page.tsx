@@ -1526,7 +1526,13 @@ export default function TimeTracker() {
     const completedBlockIndex = getBlockIndex(completedBlockId)
 
     // Step 1: Move all future tasks 2 blocks away (to make room for the undone task)
-    const { updatedBlocks } = pushTasksForward(nextBlockIndex, 2)
+    // If the current (next) block is pinned, force-move it and transfer the pin
+    const nextIsPinned = timeBlocks[nextBlockIndex]?.isPinned
+    const { updatedBlocks } = pushTasksForward(
+      nextBlockIndex,
+      2,
+      nextIsPinned ? { forceMovePinnedAtIndices: new Set([nextBlockIndex]) } : undefined
+    )
 
     // Step 2: Move the completed block's task 2 blocks into the future (so user can restart where they left off)
     const completedBlock = updatedBlocks[completedBlockIndex]
@@ -1538,7 +1544,7 @@ export default function TimeTracker() {
         !completedBlock.task.title?.includes("Interrupted")) {
       
       // The target should be exactly 2 blocks after the current block (nextBlockIndex + 2)
-      let targetIndex = nextBlockIndex + 1
+      let targetIndex = nextBlockIndex + 2
       console.log("Moving completed task from index", completedBlockIndex, "to block index:", targetIndex)
       
       if (targetIndex < updatedBlocks.length) {
@@ -1546,7 +1552,12 @@ export default function TimeTracker() {
         const taskToMove = { ...completedBlock.task }
         
         // Clear the original position first
+        const completedWasPinned = !!updatedBlocks[completedBlockIndex].isPinned
         updatedBlocks[completedBlockIndex].task = undefined
+        if (completedWasPinned) {
+          // Source no longer pinned; we'll pin the destination
+          updatedBlocks[completedBlockIndex].isPinned = false
+        }
         
         // Find nearest non-pinned empty slot at or after targetIndex
         while (
@@ -1561,6 +1572,10 @@ export default function TimeTracker() {
             id: `rescheduled-${Date.now()}`,
           }
           updatedBlocks[targetIndex].isRecentlyMoved = true
+          // If the completed block was pinned, transfer the pin to the destination
+          if (completedWasPinned) {
+            updatedBlocks[targetIndex].isPinned = true
+          }
         }
         
         console.log("Task moved successfully from", completedBlockIndex, "to", targetIndex)
