@@ -6,7 +6,7 @@ import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Play, Pause, Square, Mic, Calendar, Database, ArrowRight, Undo2, Clock, Settings } from "lucide-react"
+import { Play, Pause, Square, Mic, Calendar, Database, ArrowRight, Undo2, Clock, Settings, Pin, PinOff } from "lucide-react"
 import { cn } from "@/lib/utils"
 import TaskSelector from "@/components/task-selector"
 import VoiceInterface from "@/components/voice-interface"
@@ -34,6 +34,8 @@ interface TimeBlock {
   isActive: boolean
   isCompleted: boolean
   isRecentlyMoved?: boolean
+  // If pinned, this block's task should not be auto-moved or overwritten
+  isPinned?: boolean
 }
 
 interface CalendarEvent {
@@ -705,22 +707,29 @@ export default function TimeTracker() {
     const tasksToMove: Array<{ task: any; originalIndex: number }> = []
 
     for (let i = fromBlockIndex; i < updatedBlocks.length; i++) {
-      if (updatedBlocks[i].task) {
-        tasksToMove.push({
-          task: updatedBlocks[i].task,
-          originalIndex: i,
-        })
-        updatedBlocks[i].task = undefined // Clear the original position
+      const blk = updatedBlocks[i]
+      if (blk.task) {
+        // Do not move pinned blocks; leave them as-is
+        if (blk.isPinned) continue
+        tasksToMove.push({ task: blk.task, originalIndex: i })
+        blk.task = undefined // Clear the original position for movable tasks only
       }
     }
 
-    // Place tasks in new positions (offset blocks later)
-    tasksToMove.forEach(({ task }, index) => {
-      const newIndex = fromBlockIndex + offset + index
-      if (newIndex < updatedBlocks.length) {
-        updatedBlocks[newIndex].task = task
-        updatedBlocks[newIndex].isRecentlyMoved = true
-        affectedBlocks.push(updatedBlocks[newIndex].id)
+    // Place tasks in new positions (offset blocks later), skipping pinned/occupied slots
+    let placeCursor = fromBlockIndex + offset
+    tasksToMove.forEach(({ task }) => {
+      while (
+        placeCursor < updatedBlocks.length &&
+        (updatedBlocks[placeCursor].isPinned || updatedBlocks[placeCursor].task)
+      ) {
+        placeCursor++
+      }
+      if (placeCursor < updatedBlocks.length) {
+        updatedBlocks[placeCursor].task = task
+        updatedBlocks[placeCursor].isRecentlyMoved = true
+        affectedBlocks.push(updatedBlocks[placeCursor].id)
+        placeCursor++
       }
     })
 
@@ -777,6 +786,7 @@ export default function TimeTracker() {
   // Drag and drop handlers for planning feature
   const handleDragStart = (e: React.DragEvent, block: TimeBlock, isExpand: boolean = false) => {
     if (!block.task) return
+    if (block.isPinned) return
     
     setDragState({
       sourceBlockId: block.id,
@@ -901,13 +911,23 @@ export default function TimeTracker() {
     const targetBlock = updatedBlocks[targetIndex]
     const affectedBlocks: string[] = [sourceBlockId, targetBlockId]
     
-    // If target block has a task, we need to postpone it
+    // If target block has a task, we need to postpone it (unless pinned)
     if (targetBlock.task) {
+      if (targetBlock.isPinned) {
+        // Can't drop onto a pinned block; abort move
+        setNotificationType('rescheduled')
+        setShowChangeNotification(true)
+        setTimeout(() => setShowChangeNotification(false), 2000)
+        return
+      }
       const taskToPostpone = targetBlock.task
       
-      // Find the next available empty block after target
+      // Find the next available empty, non-pinned block after target
       let postponeIndex = targetIndex + 1
-      while (postponeIndex < updatedBlocks.length && updatedBlocks[postponeIndex].task) {
+      while (
+        postponeIndex < updatedBlocks.length &&
+        (updatedBlocks[postponeIndex].isPinned || updatedBlocks[postponeIndex].task)
+      ) {
         postponeIndex++
       }
       
@@ -923,8 +943,10 @@ export default function TimeTracker() {
     updatedBlocks[targetIndex].task = task
     updatedBlocks[targetIndex].isRecentlyMoved = true
     
-    // Clear the source block
-    updatedBlocks[sourceIndex].task = undefined
+    // Clear the source block (unless it's pinned; if pinned, we shouldn't have allowed drag)
+    if (!updatedBlocks[sourceIndex].isPinned) {
+      updatedBlocks[sourceIndex].task = undefined
+    }
     updatedBlocks[sourceIndex].isRecentlyMoved = true
     
     // Update state
@@ -965,20 +987,19 @@ export default function TimeTracker() {
     
     if (firstBlockIdx === -1 || lastBlockIdx === -1) return
     
-    // Collect tasks that need to be postponed
+    // Collect tasks that need to be postponed (skip pinned)
     const tasksToPostpone: Array<{ task: any; originalIndex: number }> = []
     for (let i = firstBlockIdx; i <= lastBlockIdx; i++) {
-      if (updatedBlocks[i].task) {
-        tasksToPostpone.push({
-          task: updatedBlocks[i].task,
-          originalIndex: i,
-        })
+      if (updatedBlocks[i].task && !updatedBlocks[i].isPinned) {
+        tasksToPostpone.push({ task: updatedBlocks[i].task, originalIndex: i })
       }
     }
     
-    // Clear the blocks we're filling
+    // Clear the blocks we're filling (do not clear pinned)
     for (let i = firstBlockIdx; i <= lastBlockIdx; i++) {
-      updatedBlocks[i].task = undefined
+      if (!updatedBlocks[i].isPinned) {
+        updatedBlocks[i].task = undefined
+      }
     }
     
     // Fill the blocks with numbered tasks (starting from 2 since original is 1)
@@ -995,10 +1016,13 @@ export default function TimeTracker() {
       }
     })
     
-    // Postpone the displaced tasks to empty blocks after the filled range
+    // Postpone the displaced tasks to empty, non-pinned blocks after the filled range
     let postponeIdx = lastBlockIdx + 1
     tasksToPostpone.forEach(({ task }) => {
-      while (postponeIdx < updatedBlocks.length && updatedBlocks[postponeIdx].task) {
+      while (
+        postponeIdx < updatedBlocks.length &&
+        (updatedBlocks[postponeIdx].isPinned || updatedBlocks[postponeIdx].task)
+      ) {
         postponeIdx++
       }
       if (postponeIdx < updatedBlocks.length) {
@@ -1052,7 +1076,7 @@ export default function TimeTracker() {
       if (updatedBlocks[i].task && !blockIds.includes(updatedBlocks[i].id)) {
         continue // Skip blocks not in selection
       }
-      if (updatedBlocks[i].task) {
+      if (updatedBlocks[i].task && !updatedBlocks[i].isPinned) {
         tasksToPostpone.push({
           task: updatedBlocks[i].task,
           originalIndex: i,
@@ -1065,6 +1089,9 @@ export default function TimeTracker() {
     blockIds.forEach(blockId => {
       const blockIndex = updatedBlocks.findIndex(b => b.id === blockId)
       if (blockIndex !== -1) {
+        if (updatedBlocks[blockIndex].isPinned) {
+          return // do not overwrite pinned
+        }
         // Create numbered task title
         const baseTitle = task.title.replace(/\d+$/, '').trim() // Remove existing numbers
         const numberedTitle = `${baseTitle} #${taskNumber}`
@@ -1080,11 +1107,11 @@ export default function TimeTracker() {
       }
     })
     
-    // Postpone original tasks to blocks after the filled range
+    // Postpone original tasks to blocks after the filled range (skip pinned)
     let postponeIndex = maxIndex + 1
     tasksToPostpone.forEach(({ task }) => {
-      // Find next available block
-      while (postponeIndex < updatedBlocks.length && updatedBlocks[postponeIndex].task) {
+      // Find next available non-pinned empty block
+      while (postponeIndex < updatedBlocks.length && (updatedBlocks[postponeIndex].isPinned || updatedBlocks[postponeIndex].task)) {
         postponeIndex++
       }
       
@@ -1220,6 +1247,13 @@ export default function TimeTracker() {
 
     setShowQuickInput(false)
     setEditingBlockId(null)
+  }
+
+  // Toggle pin/unpin for a block
+  const togglePin = (blockId: string) => {
+    setTimeBlocks((prev) =>
+      prev.map((b) => (b.id === blockId ? { ...b, isPinned: !b.isPinned } : b)),
+    )
   }
 
   const handleQuickTaskDelete = () => {
@@ -1434,7 +1468,7 @@ export default function TimeTracker() {
         !completedBlock.task.title?.includes("Interrupted")) {
       
       // The target should be exactly 2 blocks after the current block (nextBlockIndex + 2)
-      const targetIndex = nextBlockIndex + 1
+      let targetIndex = nextBlockIndex + 1
       console.log("Moving completed task from index", completedBlockIndex, "to block index:", targetIndex)
       
       if (targetIndex < updatedBlocks.length) {
@@ -1444,12 +1478,20 @@ export default function TimeTracker() {
         // Clear the original position first
         updatedBlocks[completedBlockIndex].task = undefined
         
-        // Place the task at the target position
-        updatedBlocks[targetIndex].task = {
-          ...taskToMove,
-          id: `rescheduled-${Date.now()}`,
+        // Find nearest non-pinned empty slot at or after targetIndex
+        while (
+          targetIndex < updatedBlocks.length &&
+          (updatedBlocks[targetIndex].isPinned || updatedBlocks[targetIndex].task)
+        ) {
+          targetIndex++
         }
-        updatedBlocks[targetIndex].isRecentlyMoved = true
+        if (targetIndex < updatedBlocks.length) {
+          updatedBlocks[targetIndex].task = {
+            ...taskToMove,
+            id: `rescheduled-${Date.now()}`,
+          }
+          updatedBlocks[targetIndex].isRecentlyMoved = true
+        }
         
         console.log("Task moved successfully from", completedBlockIndex, "to", targetIndex)
       } else {
@@ -1812,7 +1854,7 @@ export default function TimeTracker() {
                 return (
                   <div key={block.id} className="relative">
                     <div
-                      draggable={!!block.task && !dragState.isDragging}
+                      draggable={!!block.task && !dragState.isDragging && !block.isPinned}
                       onDragStart={(e) => handleDragStart(e, block, false)}
                       onDragEnd={handleDragEnd}
                       onDragOver={handleDragOver}
@@ -1837,6 +1879,8 @@ export default function TimeTracker() {
                           "bg-orange-100 border-orange-300 animate-bounce": block.isRecentlyMoved && !isInPlanningSelection && !isSimpleDragTarget,
                           "bg-purple-200 border-purple-500 border-4 shadow-lg": isInPlanningSelection && dragState.isExpandMode,
                           "border-yellow-300 border-2 ring-2 ring-yellow-200": isSelected,
+                          // Visual hint when pinned
+                          "ring-2 ring-sky-300": block.isPinned,
                         },
                         block.task?.color &&
                           !isCurrentBlock &&
@@ -1862,8 +1906,16 @@ export default function TimeTracker() {
                             ? "0 0 15px rgba(147, 51, 234, 0.5)"
                             : undefined,
                       }}
-                      title={`${block.startTime} - ${block.endTime}${block.task ? `: ${block.task.title}` : ""} (${blockStatus})${isInPlanningSelection ? " - SELECTED FOR PLANNING" : ""}`}
+                      title={`${block.startTime} - ${block.endTime}${block.task ? `: ${block.task.title}` : ""} (${blockStatus})${block.isPinned ? " [PINNED]" : ""}${isInPlanningSelection ? " - SELECTED FOR PLANNING" : ""}`}
                     >
+                      {/* Pin toggle */}
+                      <button
+                        className="absolute top-1 right-1 z-10 rounded p-1 hover:bg-black/10"
+                        onClick={(e) => { e.stopPropagation(); togglePin(block.id) }}
+                        title={block.isPinned ? "Unpin (allow auto-move)" : "Pin (prevent auto-move)"}
+                      >
+                        {block.isPinned ? <Pin className="w-3 h-3" /> : <PinOff className="w-3 h-3" />}
+                      </button>
                       {/* Hour/row label gutter on the left */}
                       {(() => {
                         const [hh, mm] = block.startTime.split(":").map(Number)
