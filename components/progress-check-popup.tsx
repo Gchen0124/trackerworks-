@@ -546,8 +546,8 @@ export default function ProgressCheckPopup({
               <Button onClick={onStickToPlan} className="flex flex-col items-center gap-2 h-20 bg-sky-500 hover:bg-sky-600">
                 <CheckCircle className="h-6 w-6" />
                 <div className="text-center">
-                  <div className="font-medium">Not done, but stick to plan!</div>
-                  <div className="text-xs opacity-90">Do planned task; defer previous</div>
+                  <div className="font-medium">stick to plan</div>
+                  <div className="text-xs opacity-90">postpone last task</div>
                 </div>
               </Button>
             )}

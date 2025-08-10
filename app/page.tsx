@@ -708,21 +708,26 @@ export default function TimeTracker() {
     const updatedBlocks = [...timeBlocks]
 
     // Collect all tasks from the current position onwards that need to be moved
-    const tasksToMove: Array<{ task: any; originalIndex: number }> = []
+    const tasksToMove: Array<{ task: any; originalIndex: number; fromPinned: boolean }> = []
 
     for (let i = fromBlockIndex; i < updatedBlocks.length; i++) {
       const blk = updatedBlocks[i]
       if (blk.task) {
         // Do not move pinned blocks unless explicitly forced for this index
-        if (blk.isPinned && !(options?.forceMovePinnedAtIndices?.has(i))) continue
-        tasksToMove.push({ task: blk.task, originalIndex: i })
+        const isForcedPinnedMove = blk.isPinned && !!(options?.forceMovePinnedAtIndices?.has(i))
+        if (blk.isPinned && !isForcedPinnedMove) continue
+        tasksToMove.push({ task: blk.task, originalIndex: i, fromPinned: !!isForcedPinnedMove })
         blk.task = undefined // Clear the original position for movable tasks only
+        // If we are moving a pinned block's task, also transfer the pin (unset here; will set at destination)
+        if (isForcedPinnedMove) {
+          blk.isPinned = false
+        }
       }
     }
 
     // Place tasks in new positions (offset blocks later), skipping pinned/occupied slots
     let placeCursor = fromBlockIndex + offset
-    tasksToMove.forEach(({ task }) => {
+    tasksToMove.forEach(({ task, fromPinned }) => {
       while (
         placeCursor < updatedBlocks.length &&
         (updatedBlocks[placeCursor].isPinned || updatedBlocks[placeCursor].task)
@@ -732,6 +737,9 @@ export default function TimeTracker() {
       if (placeCursor < updatedBlocks.length) {
         updatedBlocks[placeCursor].task = task
         updatedBlocks[placeCursor].isRecentlyMoved = true
+        if (fromPinned) {
+          updatedBlocks[placeCursor].isPinned = true
+        }
         affectedBlocks.push(updatedBlocks[placeCursor].id)
         placeCursor++
       }
@@ -1417,6 +1425,12 @@ export default function TimeTracker() {
       if (place < updated.length) {
         updated[place].task = { ...completedTask, id: `deferred-${Date.now()}` }
         updated[place].isRecentlyMoved = true
+      }
+      // Leave a marker in the past block indicating it was pushed to future
+      updated[completedIndex].task = {
+        ...completedTask,
+        id: `note-${Date.now()}`,
+        title: `${completedTask.title} + pushed to future`,
       }
     }
 
