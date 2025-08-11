@@ -20,8 +20,13 @@ interface GoalsResponse {
   monthlyGoal?: string
 }
 
+function toDateStrLocal(d: Date = new Date()) {
+  const dd = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+  return dd.toISOString().slice(0, 10)
+}
+
 function todayKey(dateStr?: string) {
-  const d = dateStr ?? new Date().toISOString().slice(0, 10)
+  const d = dateStr ?? toDateStrLocal()
   return `goals:${d}`
 }
 
@@ -30,7 +35,7 @@ export default function DailyGoals() {
   const [error, setError] = useState<string | null>(null)
   const [weeklyGoal, setWeeklyGoal] = useState("")
   const [goals, setGoals] = useState<string[]>(["", "", ""]) // 3 goals
-  const [dateStr, setDateStr] = useState<string>(() => new Date().toISOString().slice(0, 10))
+  const [dateStr, setDateStr] = useState<string>(() => toDateStrLocal())
   const [source, setSource] = useState<"notion" | "local">("local")
   const [pickerOpenFor, setPickerOpenFor] = useState<number | null>(null)
   const [tcLoading, setTcLoading] = useState(false)
@@ -98,6 +103,45 @@ export default function DailyGoals() {
 
       // Persist a snapshot so UI still has something offline
       saveToLocal(filled)
+
+      // If everything appears empty from local DB/Notion for today, try recovering from yesterday (local DB)
+      const allEmpty = !filled.weeklyGoal && filled.goals.every(g => !g) && !filled.excitingGoal && !filled.eoyGoal && !filled.monthlyGoal
+      if (allEmpty) {
+        const yDate = toDateStrLocal(new Date(new Date(dateStr).getTime() - 24 * 60 * 60 * 1000))
+        try {
+          const yRes = await fetch(`/api/local/goals?date=${yDate}`)
+          if (yRes.ok) {
+            const yData: GoalsResponse = await yRes.json()
+            const yFilled: GoalsResponse = {
+              date: dateStr, // migrate to today
+              weeklyGoal: yData.weeklyGoal || "",
+              goals: [yData.goals?.[0] || "", yData.goals?.[1] || "", yData.goals?.[2] || ""],
+              pageId: yData.pageId,
+              source: 'local',
+              excitingGoal: (yData as any)?.excitingGoal || "",
+              eoyGoal: (yData as any)?.eoyGoal || "",
+              monthlyGoal: (yData as any)?.monthlyGoal || "",
+            }
+            // Apply to UI
+            setWeeklyGoal(yFilled.weeklyGoal)
+            setGoals(yFilled.goals)
+            setSource('local')
+            setExcitingGoal(yFilled.excitingGoal || "")
+            setEoyGoal(yFilled.eoyGoal || "")
+            setMonthlyGoal(yFilled.monthlyGoal || "")
+            try { window.dispatchEvent(new CustomEvent('dailyGoalsUpdated', { detail: yFilled })) } catch {}
+            saveToLocal(yFilled)
+            // Persist migrated snapshot to today's date
+            try {
+              await fetch('/api/local/goals', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(yFilled),
+              })
+            } catch {}
+          }
+        } catch {}
+      }
     } catch (e: any) {
       const local = loadFromLocal()
       if (local) {
