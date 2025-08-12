@@ -124,6 +124,8 @@ export default function TimeTracker() {
   // - Sync any 30/3-minute edits downward into 1-minute resolution
   // - Use 1-minute edits locally without affecting higher-level modes
   const oneMinuteMirrorRef = useRef<TimeBlock[]>([])
+  // Guard to avoid clobbering 1-min mirror during mode switches
+  const isSwitchingModeRef = useRef<boolean>(false)
   // Snapshots for restoring exact state when returning to a mode
   const snapshot30Ref = useRef<TimeBlock[]>([])
   const snapshot3Ref = useRef<TimeBlock[]>([])
@@ -482,6 +484,12 @@ export default function TimeTracker() {
           oneMinuteMirrorRef.current[idx] = { ...oneMinuteMirrorRef.current[idx], task: b.task ? { ...b.task } : undefined, goal: b.goal ? { ...b.goal } : undefined, isPinned: !!b.isPinned, isCompleted: !!b.isCompleted }
         }
       }
+      return
+    }
+
+    // If we just switched modes, skip one downsync cycle to preserve prior 1-min edits
+    if (isSwitchingModeRef.current) {
+      isSwitchingModeRef.current = false
       return
     }
 
@@ -1513,6 +1521,8 @@ export default function TimeTracker() {
     // Snapshot current layout before switching
     prevBlocksRef.current = timeBlocks
     prevDurationRef.current = blockDurationMinutes
+    // Prevent immediate downsync to 1-min mirror on the next render
+    isSwitchingModeRef.current = true
     // Explicitly snapshot current mode for reliable restore when returning
     const deepCopy = (b: TimeBlock): TimeBlock => ({
       ...b,
