@@ -29,26 +29,4 @@ CREATE TABLE IF NOT EXISTS goals (
   created_at INTEGER DEFAULT (strftime('%s','now')*1000),
   updated_at INTEGER DEFAULT (strftime('%s','now')*1000)
 );
--- Core blocks table used by /api/local/blocks
-CREATE TABLE IF NOT EXISTS blocks (
-  date TEXT NOT NULL,
-  minute_index INTEGER NOT NULL,
-  task_name TEXT,
-  is_pinned INTEGER DEFAULT 0,
-  status TEXT,
-  label_override TEXT,
-  moved_from_minute INTEGER,
-  created_at INTEGER DEFAULT (strftime('%s','now')*1000),
-  updated_at INTEGER DEFAULT (strftime('%s','now')*1000),
-  PRIMARY KEY (date, minute_index)
-);
--- Optional history table for future auditing (not required by current API)
-CREATE TABLE IF NOT EXISTS block_history (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  date TEXT NOT NULL,
-  minute_index INTEGER NOT NULL,
-  action TEXT,
-  payload TEXT,
-  created_at INTEGER DEFAULT (strftime('%s','now')*1000)
-);
 `)
