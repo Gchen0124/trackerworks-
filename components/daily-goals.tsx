@@ -183,6 +183,25 @@ export default function DailyGoals() {
     setBdOpen(true)
   }
 
+  // Allow other parts of the app (e.g., selection toolbar) to open breakdown for a goal
+  useEffect(() => {
+    const handler = (e: Event) => {
+      try {
+        const detail = (e as CustomEvent).detail as { which?: string; label?: string }
+        if (!detail?.which) return
+        openBreakdownFor(detail.which, detail.label || detail.which)
+      } catch {}
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('openBreakdownFor', handler as EventListener)
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('openBreakdownFor', handler as EventListener)
+      }
+    }
+  }, [dateStr])
+
   const loadTaskCalendar = async () => {
     try {
       setTcLoading(true)

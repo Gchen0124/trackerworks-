@@ -120,6 +120,7 @@ export default function TimeTracker() {
     selectedBlocks: [],
     taskToFill: null,
   })
+  const [lastAssignedGoalId, setLastAssignedGoalId] = useState<string | null>(null)
 
   // Multi-select and bulk move state
   const [multiSelect, setMultiSelect] = useState<{ isActive: boolean; selected: string[]; lastAnchorId: string | null }>({
@@ -695,11 +696,18 @@ export default function TimeTracker() {
   // ===== Goal assignment helpers =====
   const assignGoalToSelected = (goalId: string) => {
     if (multiSelect.selected.length === 0) return
-    const goal = goalOptions.find((g) => g.id === goalId)
-    if (!goal) return
-    setTimeBlocks((prev) =>
-      prev.map((b) => (multiSelect.selected.includes(b.id) ? { ...b, goal: { id: goal.id, label: goal.label, color: goal.color } } : b)),
-    )
+    const updated = timeBlocks.map((b) => {
+      if (multiSelect.selected.includes(b.id)) {
+        const goal = goalOptions.find((g) => g.id === goalId)
+        return {
+          ...b,
+          goal: goal ? { id: goal.id, label: goal.label, color: goal.color } : undefined,
+        }
+      }
+      return b
+    })
+    setTimeBlocks(updated)
+    setLastAssignedGoalId(goalId)
     const change: TaskChange = {
       type: 'edit',
       blockId: multiSelect.selected[0],
@@ -2013,6 +2021,23 @@ export default function TimeTracker() {
                 >
                   {multiSelect.isActive ? "Exit Select" : "Select"}
                 </Button>
+                {multiSelect.isActive && (
+                  <Button
+                    variant="secondary"
+                    className="h-8"
+                    disabled={!lastAssignedGoalId}
+                    onClick={() => {
+                      if (!lastAssignedGoalId) return
+                      const which = lastAssignedGoalId === 'goal_1' ? 'goal1' : lastAssignedGoalId === 'goal_2' ? 'goal2' : lastAssignedGoalId === 'goal_3' ? 'goal3' : null
+                      if (!which) return
+                      const goal = goalOptions.find(g => g.id === lastAssignedGoalId)
+                      const label = goal?.label || 'Goal'
+                      try { window.dispatchEvent(new CustomEvent('openBreakdownFor', { detail: { which, label } })) } catch {}
+                    }}
+                  >
+                    Break down
+                  </Button>
+                )}
                 {multiSelect.selected.length > 0 && (
                   <div className="flex items-center gap-2">
                     <Badge variant="secondary">{multiSelect.selected.length} selected</Badge>
@@ -2033,7 +2058,7 @@ export default function TimeTracker() {
           </CardHeader>
           <CardContent>
             <div
-              className={`grid gap-2 max-h-[600px] overflow-y-auto p-2 pl-12`}
+              className={`grid gap-x-2 gap-y-6 max-h-[600px] overflow-y-auto p-2 pl-12`}
               style={{ gridTemplateColumns: `repeat(${getGridColumns()}, minmax(0, 1fr))` }}
             >
               {timeBlocks.map((block, index) => {
@@ -2137,11 +2162,11 @@ export default function TimeTracker() {
                         }
                         return null
                       })()}
-                      {/* Goal tag on top of block with glassmorphism */}
+                      {/* Goal tag as a compact "hat" above the block; extra row gap prevents overlap with previous row */}
                       {block.goal && (
                         <div
                           className={cn(
-                            "absolute -top-2 left-2 px-3 py-1 rounded-md shadow-md",
+                            "absolute left-2 top-0 -translate-y-full px-2 py-0.5 rounded-md shadow-md z-10",
                             // Stronger, more visible goal tag backgrounds by goal id
                             block.goal.id === 'goal_1' && 'bg-amber-500',
                             block.goal.id === 'goal_2' && 'bg-emerald-500',
@@ -2149,7 +2174,9 @@ export default function TimeTracker() {
                           )}
                           title={`Assigned Goal: ${block.goal.label}`}
                         >
-                          <span className="text-white text-xs sm:text-sm font-semibold tracking-wide drop-shadow">{block.goal.label}</span>
+                          <span className="text-white text-[10px] sm:text-xs font-semibold tracking-wide drop-shadow leading-tight break-words whitespace-normal">
+                            {block.goal.label}
+                          </span>
                         </div>
                       )}
                       <div className="flex justify-between items-start">
@@ -2182,16 +2209,35 @@ export default function TimeTracker() {
                               "top-1/2"
                             )}
                           >
-                            <p
-                              className={cn(
-                                blockDurationMinutes === 3 ? "text-xs font-medium" : "text-sm font-medium",
-                                (isCurrentBlock || isInPlanningSelection || (blockStatus === 'future' && !!block.task)) ? "text-white" : "text-gray-900",
-                                // Allow multi-line wrap and tighter leading
-                                "leading-snug break-words"
-                              )}
-                            >
-                              {block.task.title}
-                            </p>
+                            {(() => {
+                              const title = block.task?.title || ""
+                              const len = title.length
+                              // Base sizes by mode
+                              let sizeClass = blockDurationMinutes === 3 ? "text-xs" : "text-sm"
+                              // Shrink progressively when long to preserve visibility with long goals
+                              if (blockDurationMinutes === 3) {
+                                if (len > 70) sizeClass = "text-[9px]"
+                                else if (len > 40) sizeClass = "text-[10px]"
+                              } else if (blockDurationMinutes === 1) {
+                                if (len > 70) sizeClass = "text-[9px]"
+                                else if (len > 45) sizeClass = "text-[10px]"
+                              } else {
+                                if (len > 90) sizeClass = "text-[10px]"
+                                else if (len > 60) sizeClass = "text-[11px]"
+                              }
+                              return (
+                                <p
+                                  className={cn(
+                                    `${sizeClass} font-medium`,
+                                    (isCurrentBlock || isInPlanningSelection || (blockStatus === 'future' && !!block.task)) ? "text-white" : "text-gray-900",
+                                    // Allow multi-line wrap and tighter leading
+                                    "leading-snug break-words"
+                                  )}
+                                >
+                                  {title}
+                                </p>
+                              )
+                            })()}
                           </div>
                           {/* Expand Corner Indicator */}
                           {blockStatus !== 'past' && (

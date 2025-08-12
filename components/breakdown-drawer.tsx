@@ -227,7 +227,7 @@ export default function BreakdownDrawer({ open, onOpenChange, parentId, goalId, 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl w-[min(100vw-2rem,960px)] overflow-hidden">
+      <DialogContent className="max-w-3xl w-[min(100vw-2rem,960px)] max-h-[90vh] overflow-auto">
         <DialogHeader>
           <DialogTitle>Break down: <span className="text-zinc-700">{parentLabel}</span></DialogTitle>
           <DialogDescription>
@@ -282,7 +282,7 @@ export default function BreakdownDrawer({ open, onOpenChange, parentId, goalId, 
               </div>
             ))}
 
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 sticky bottom-0 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70 py-2 z-10">
               <div className="flex flex-wrap items-center gap-2">
                 <Button variant="outline" onClick={addItem} className="flex items-center gap-2"><Plus className="h-4 w-4"/> Add</Button>
                 <Button variant="outline" onClick={() => callAI()} disabled={generating} className="flex items-center gap-2"><Sparkles className="h-4 w-4"/> {generating ? 'Generating…' : 'Generate with AI'}</Button>
