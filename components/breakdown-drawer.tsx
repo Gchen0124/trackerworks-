@@ -196,6 +196,27 @@ export default function BreakdownDrawer({ open, onOpenChange, parentId, goalId, 
     }
   }
 
+  const clearDraft = async () => {
+    try {
+      setSaving(true)
+      setError(null)
+      // Overwrite with empty items for this scope
+      const res = await fetch("/api/local/breakdown", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parentId, goalId, scopeType, items: [] }),
+      })
+      if (!res.ok) throw new Error("Failed to clear draft")
+      // Reset UI
+      setItems([])
+      setChatMessages([])
+    } catch (e: any) {
+      setError(e?.message || "Clear error")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const assignToSelection = async () => {
     // Emit an app-wide event so the grid/selection layer can handle actual placement
     try {
@@ -206,7 +227,7 @@ export default function BreakdownDrawer({ open, onOpenChange, parentId, goalId, 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-3xl w-[min(100vw-2rem,960px)] overflow-hidden">
         <DialogHeader>
           <DialogTitle>Break down: <span className="text-zinc-700">{parentLabel}</span></DialogTitle>
           <DialogDescription>
@@ -261,13 +282,14 @@ export default function BreakdownDrawer({ open, onOpenChange, parentId, goalId, 
               </div>
             ))}
 
-            <div className="flex items-center justify-between pt-2">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button variant="outline" onClick={addItem} className="flex items-center gap-2"><Plus className="h-4 w-4"/> Add</Button>
                 <Button variant="outline" onClick={() => callAI()} disabled={generating} className="flex items-center gap-2"><Sparkles className="h-4 w-4"/> {generating ? 'Generating…' : 'Generate with AI'}</Button>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button onClick={saveDraft} disabled={saving} className="flex items-center gap-2"><Save className="h-4 w-4"/> Save draft</Button>
+                <Button variant="outline" onClick={clearDraft} disabled={saving} className="flex items-center gap-2"><Trash2 className="h-4 w-4"/> Clear draft</Button>
                 <Button variant="secondary" onClick={assignToSelection} className="flex items-center gap-2"><Send className="h-4 w-4"/> Assign to selection</Button>
               </div>
             </div>
@@ -283,15 +305,15 @@ export default function BreakdownDrawer({ open, onOpenChange, parentId, goalId, 
                   <div className="text-xs text-zinc-500">No conversation yet. Ask for help like: "Make these tasks more concrete" or "Prioritize for this afternoon."</div>
                 )}
                 {chatMessages.map((m, i) => (
-                  <div key={i} className={`text-sm ${m.role === 'assistant' ? 'text-zinc-800' : 'text-zinc-700'}`}>
+                  <div key={i} className={`text-sm break-words ${m.role === 'assistant' ? 'text-zinc-800' : 'text-zinc-700'}`}>
                     <span className="font-semibold mr-1">{m.role === 'assistant' ? 'AI' : 'You'}:</span>
                     <span>{m.content}</span>
                   </div>)
                 )}
               </div>
-              <div className="flex items-center gap-2 mt-2">
-                <Input value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Ask the AI about this goal…" onKeyDown={(e) => { if (e.key === 'Enter') onSendChat() }} />
-                <Button onClick={onSendChat} disabled={generating || !chatInput.trim()} className="flex items-center gap-2"><Send className="h-4 w-4"/> Send</Button>
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <Input className="flex-1 min-w-0" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Ask the AI about this goal…" onKeyDown={(e) => { if (e.key === 'Enter') onSendChat() }} />
+                <Button onClick={onSendChat} disabled={generating || !chatInput.trim()} className="flex items-center gap-2 shrink-0"><Send className="h-4 w-4"/> Send</Button>
               </div>
             </div>
           </div>
