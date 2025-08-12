@@ -1811,6 +1811,9 @@ export default function TimeTracker() {
               <Mic className="h-4 w-4" />
               Voice Assistant
             </Button>
+            <Button variant="outline" className="flex items-center gap-2" onClick={exportTodayCsv}>
+              Export CSV
+            </Button>
             <Button variant="outline" onClick={() => setShowNotionTasks(true)} className="flex items-center gap-2">
               <Database className="h-4 w-4" />
               Notion Tasks
@@ -1995,7 +1998,6 @@ export default function TimeTracker() {
                 24-Hour Time Grid ({blockDurationMinutes}-minute blocks)
               </span>
               <div className="flex items-center gap-2">
-                <Button variant="outline" className="h-8" onClick={exportTodayCsv}>Export CSV</Button>
                 {planningMode.isActive && (
                   <Badge className="bg-purple-500 text-white animate-pulse">
                     Selecting {planningMode.selectedBlocks.length} blocks for planning
