@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Calendar, RefreshCw, Database, Search } from "lucide-react"
+import { Calendar, RefreshCw, Database, Search, ListChecks } from "lucide-react"
+import BreakdownDrawer from "@/components/breakdown-drawer"
 
 interface GoalsResponse {
   date: string
@@ -40,6 +41,10 @@ export default function DailyGoals() {
   const [excitingGoal, setExcitingGoal] = useState("")
   const [eoyGoal, setEoyGoal] = useState("")
   const [monthlyGoal, setMonthlyGoal] = useState("")
+  // Breakdown drawer state
+  const [bdOpen, setBdOpen] = useState(false)
+  const [bdGoalId, setBdGoalId] = useState<string | undefined>(undefined)
+  const [bdLabel, setBdLabel] = useState<string>("")
 
   const storageKey = useMemo(() => todayKey(dateStr), [dateStr])
 
@@ -170,6 +175,14 @@ export default function DailyGoals() {
     await loadTaskCalendar()
   }
 
+  const todayStr = useMemo(() => dateStr, [dateStr])
+  const goalKeyFor = (which: string) => `${todayStr}#${which}`
+  const openBreakdownFor = (which: string, label: string) => {
+    setBdGoalId(goalKeyFor(which))
+    setBdLabel(label)
+    setBdOpen(true)
+  }
+
   const loadTaskCalendar = async () => {
     try {
       setTcLoading(true)
@@ -244,6 +257,15 @@ export default function DailyGoals() {
               >
                 <Database className="h-4 w-4" />
               </Button>
+              <Button
+                size="icon"
+                variant="secondary"
+                className="bg-white/40 text-zinc-700"
+                title="Break down this goal into tasks"
+                onClick={() => openBreakdownFor('exciting', excitingGoal || 'Exciting Goal')}
+              >
+                <ListChecks className="h-4 w-4" />
+              </Button>
             </div>
           </div>
 
@@ -265,6 +287,15 @@ export default function DailyGoals() {
                 title="Pick from Task Calendar"
               >
                 <Database className="h-4 w-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="secondary"
+                className="bg-white/40 text-zinc-700"
+                title="Break down this goal into tasks"
+                onClick={() => openBreakdownFor('eoy', eoyGoal || 'EOY Goal')}
+              >
+                <ListChecks className="h-4 w-4" />
               </Button>
             </div>
           </div>
@@ -288,6 +319,15 @@ export default function DailyGoals() {
               >
                 <Database className="h-4 w-4" />
               </Button>
+              <Button
+                size="icon"
+                variant="secondary"
+                className="bg-white/40 text-zinc-700"
+                title="Break down this goal into tasks"
+                onClick={() => openBreakdownFor('monthly', monthlyGoal || 'Monthly Goal')}
+              >
+                <ListChecks className="h-4 w-4" />
+              </Button>
             </div>
           </div>
         </div>
@@ -310,6 +350,15 @@ export default function DailyGoals() {
               title="Pick from Task Calendar"
             >
               <Database className="h-4 w-4" />
+            </Button>
+            <Button
+              size="icon"
+              variant="secondary"
+              className="bg-white/40 text-zinc-700"
+              title="Break down weekly goal into tasks"
+              onClick={() => openBreakdownFor('weekly', weeklyGoal || 'Weekly Goal')}
+            >
+              <ListChecks className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -339,11 +388,29 @@ export default function DailyGoals() {
                 >
                   <Database className="h-4 w-4" />
                 </Button>
+                <Button
+                  size="icon"
+                  variant="secondary"
+                  className="bg-white/40 text-zinc-700"
+                  title="Break down into tasks"
+                  onClick={() => openBreakdownFor(`goal${i+1}`, goals[i] || `Goal ${i+1}`)}
+                >
+                  <ListChecks className="h-4 w-4" />
+                </Button>
               </div>
             </div>
           ))}
         </div>
       </Card>
+
+      {/* Breakdown Drawer */}
+      <BreakdownDrawer
+        open={bdOpen}
+        onOpenChange={setBdOpen}
+        goalId={bdGoalId}
+        scopeType="task"
+        parentLabel={bdLabel}
+      />
 
       {/* Task Calendar Picker */}
       <Dialog open={pickerOpenFor !== null} onOpenChange={(open) => !open && setPickerOpenFor(null)}>

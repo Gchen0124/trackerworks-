@@ -99,6 +99,8 @@ export default function ProgressCheckPopup({
   const decisionMadeRef = useRef(false)
   const [isListening, setIsListening] = useState(false)
   const audioStreamRef = useRef<MediaStream | null>(null)
+  const audioElemRef = useRef<HTMLAudioElement | null>(null)
+  const audioAbortRef = useRef<AbortController | null>(null)
   const hasInitiatedListeningRef = useRef(false)
   const sessionActiveRef = useRef(false)
   const sessionIdRef = useRef(0)
@@ -116,23 +118,67 @@ export default function ProgressCheckPopup({
     }
   }, [isOpen])
 
-  const speakMessage = (message: string) => {
-    if ("speechSynthesis" in window) {
-      try {
-        // Pause recognition while we speak to avoid feedback
-        stopRecognition()
-      } catch (_) {}
-      const utterance = new SpeechSynthesisUtterance(message)
-      utterance.rate = 0.9
-      utterance.onend = () => {
-        // After TTS finishes, resume listening if popup is still active
+  const speakMessage = async (message: string) => {
+    // Always stop any ongoing audio and recognition first
+    try { stopRecognition() } catch (_) {}
+    try {
+      audioElemRef.current?.pause()
+      audioElemRef.current?.removeAttribute("src")
+      audioElemRef.current = null
+      audioAbortRef.current?.abort()
+      audioAbortRef.current = null
+    } catch (_) {}
+
+    // Attempt Hugging Face TTS via our API with a short timeout
+    try {
+      const controller = new AbortController()
+      audioAbortRef.current = controller
+      const timer = setTimeout(() => controller.abort(), 6000) // 6s safeguard
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: message, format: "mp3" }),
+        signal: controller.signal,
+      })
+      clearTimeout(timer)
+      if (!res.ok) throw new Error("tts_failed")
+      const blob = await res.blob()
+      if (!(blob && blob.size > 0)) throw new Error("empty_audio")
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio()
+      audioElemRef.current = audio
+      audio.src = url
+      audio.onended = () => {
+        URL.revokeObjectURL(url)
+        // Resume listening after audio playback finishes
         if (isOpenRef.current && countdownRef.current > 0 && !decisionMadeRef.current && sessionActiveRef.current) {
-          // slight delay to allow audio device handoff
           setTimeout(() => startRecognition(), 120)
         }
       }
-      speechSynthesis.speak(utterance)
+      audio.onerror = () => {
+        URL.revokeObjectURL(url)
+        // Fallback to browser TTS on error
+        fallbackSpeak(message)
+      }
+      await audio.play()
+      return
+    } catch (_) {
+      // Fallback to browser TTS on any error/timeout/abort
+      fallbackSpeak(message)
     }
+  }
+
+  const fallbackSpeak = (message: string) => {
+    if (!("speechSynthesis" in window)) return
+    try { (window as any).speechSynthesis?.cancel?.() } catch (_) {}
+    const utterance = new SpeechSynthesisUtterance(message)
+    utterance.rate = 0.9
+    utterance.onend = () => {
+      if (isOpenRef.current && countdownRef.current > 0 && !decisionMadeRef.current && sessionActiveRef.current) {
+        setTimeout(() => startRecognition(), 120)
+      }
+    }
+    try { speechSynthesis.speak(utterance) } catch (_) {}
   }
 
   // Best-effort mic warm-up to ensure permission and open device
@@ -391,6 +437,18 @@ export default function ProgressCheckPopup({
       hasInitiatedListeningRef.current = false
       sessionActiveRef.current = false
       try { (window as any).speechSynthesis?.cancel?.() } catch (_) {}
+      try {
+        const a = audioElemRef.current
+        if (a) {
+          a.onended = null
+          a.onerror = null
+          a.pause()
+          a.removeAttribute("src")
+        }
+        audioElemRef.current = null
+        audioAbortRef.current?.abort()
+        audioAbortRef.current = null
+      } catch (_) {}
       stopRecognition()
       return
     }

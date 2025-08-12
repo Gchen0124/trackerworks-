@@ -14,7 +14,6 @@ import NotionTasks from "@/components/notion-tasks"
 import QuickTaskInput from "@/components/quick-task-input"
 import ProgressCheckPopup from "@/components/progress-check-popup"
 import DailyGoals from "@/components/daily-goals"
-import { useLocalBlocks } from "@/lib/use-local-blocks"
 
 interface TimeBlock {
   id: string
@@ -130,175 +129,10 @@ export default function TimeTracker() {
   })
   const [bulkMove, setBulkMove] = useState<{ active: boolean }>({ active: false })
 
-  // Read-only wiring to local DB blocks (Phase 1)
-  const { frames: dbFrames, mode: dbMode, refresh: refreshDbFrames } = useLocalBlocks(blockDurationMinutes, new Date())
-  useEffect(() => {
-    // Only adopt DB-backed frames in canonical modes during Phase 1
-    if (!dbFrames) return
-    if (![30, 3, 1].includes(blockDurationMinutes)) return
-    // Overlay DB tasks onto existing grid using containment so cross-mode transitions display correctly
-    // Build a minute -> frame map for fast containment lookup
-    const minuteToFrame: (typeof dbFrames[number] | undefined)[] = new Array(1440)
-    for (const f of dbFrames) {
-      for (let m = f.startMinute; m < Math.min(f.endMinute, 1440); m++) minuteToFrame[m] = f
-    }
-    const parseHHMMToMin = (hhmm: string) => {
-      const [hh, mm] = hhmm.split(":").map((x) => parseInt(x, 10))
-      return hh * 60 + mm
-    }
-    setTimeBlocks((prev) =>
-      prev.map((b) => {
-        const startMin = parseHHMMToMin(b.startTime)
-        const f = minuteToFrame[startMin]
-        if (!f) return b
-        const taskTitle = f.labelOverride || f.taskName || ""
-        const hasTask = !!taskTitle
-        // If DB frame has no task, keep existing task instead of clearing it
-        if (!hasTask) {
-          return {
-            ...b,
-            isCompleted: f.status === 'done',
-            isPinned: !!f.isPinned,
-          }
-        }
-        const color = b.task?.color && b.task.color.length > 0 ? b.task.color : "bg-blue-500"
-        return {
-          ...b,
-          task: { id: b.id, title: taskTitle, type: b.task?.type || "custom", color },
-          isCompleted: f.status === 'done',
-          isPinned: !!f.isPinned,
-        }
-      })
-    )
-  }, [dbFrames, blockDurationMinutes])
-
-  // -------- Phase 2: Persist assign/set to local DB (mode-aware) --------
-  const isDbModeSupported = [30, 3, 1].includes(blockDurationMinutes)
-  const stepMinutes = blockDurationMinutes
-  const parseMinuteFromId = (id: string): number | null => {
-    // Prefer db-<startMinute> ids
-    if (id.startsWith('db-')) {
-      const m = parseInt(id.slice(3), 10)
-      return Number.isFinite(m) ? m : null
-    }
-    // Fallback: look up current block by id and parse its startTime (HH:MM)
-    const blk = timeBlocks.find((b) => b.id === id)
-    if (!blk) return null
-    const [hh, mm] = blk.startTime.split(":").map((x) => parseInt(x, 10))
-    if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
-    return hh * 60 + mm
-  }
-  const toDateStrLocal = (d: Date) => {
-    const dd = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
-    return dd.toISOString().slice(0, 10)
-  }
-  const postSetRange = async (dateStr: string, startMinute: number, endMinute: number, taskTitle: string, isPinned = false) => {
-    await fetch('/api/local/blocks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'set_range',
-        date: dateStr,
-        startMinute,
-        endMinute,
-        taskName: taskTitle,
-        isPinned,
-        status: 'planned',
-      }),
-    })
-  }
-  const postPinRange = async (dateStr: string, startMinute: number, length: number, isPinned: boolean) => {
-    await fetch('/api/local/blocks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'pin_range',
-        date: dateStr,
-        startMinute,
-        length,
-        isPinned,
-      }),
-    })
-  }
-  const postPostponeRange = async (dateStr: string, startMinute: number, length: number, deltaMinutes: number, carryPin = true) => {
-    await fetch('/api/local/blocks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'postpone_range',
-        date: dateStr,
-        startMinute,
-        length,
-        deltaMinutes,
-        carryPin,
-      }),
-    })
-  }
-  const postRenameRange = async (dateStr: string, startMinute: number, length: number, label: string) => {
-    await fetch('/api/local/blocks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'rename_range',
-        date: dateStr,
-        startMinute,
-        length,
-        label,
-      }),
-    })
-  }
-  const persistAssignForContiguous = async (blockIds: string[], titleByIndex: (i: number) => string) => {
-    if (!isDbModeSupported) return
-    const dateStr = toDateStrLocal(new Date())
-    // Sort by minute
-    const minutes = blockIds
-      .map((id) => parseMinuteFromId(id))
-      .filter((m): m is number => m !== null)
-      .sort((a, b) => a - b)
-    if (minutes.length === 0) return
-    // Group into contiguous runs by step
-    const runs: number[][] = []
-    let run: number[] = []
-    for (const m of minutes) {
-      if (run.length === 0) {
-        run.push(m)
-      } else {
-        const last = run[run.length - 1]
-        if (m === last + stepMinutes) run.push(m)
-        else { runs.push(run); run = [m] }
-      }
-    }
-    if (run.length) runs.push(run)
-    // Fire POST per run with the run's title pattern when numbering is not uniform, we default to per-block post
-    for (let r = 0; r < runs.length; r++) {
-      const group = runs[r]
-      // If titles differ per index, fall back to per-block writes
-      let uniform = true
-      const firstTitle = titleByIndex(0)
-      for (let i = 0; i < group.length; i++) {
-        if (titleByIndex(i) !== firstTitle) { uniform = false; break }
-      }
-      if (uniform) {
-        const startMinute = group[0]
-        const endMinute = Math.min(group[group.length - 1] + stepMinutes, 1440)
-        await postSetRange(dateStr, startMinute, endMinute, firstTitle)
-      } else {
-        for (let i = 0; i < group.length; i++) {
-          const startMinute = group[i]
-          const endMinute = Math.min(startMinute + stepMinutes, 1440)
-          await postSetRange(dateStr, startMinute, endMinute, titleByIndex(i))
-        }
-      }
-    }
-    // Refresh frames after writes
-    refreshDbFrames()
-  }
-
   // Block duration options
   const blockDurationOptions: BlockDurationOption[] = [
     { value: 1, label: "1 min", description: "1440 blocks/day - Ultra micro focus" },
     { value: 3, label: "3 min", description: "480 blocks/day - Micro focus" },
-    { value: 10, label: "10 min", description: "144 blocks/day - Detailed" },
     { value: 30, label: "30 min", description: "48 blocks/day - High level" },
   ]
 
@@ -355,6 +189,87 @@ export default function TimeTracker() {
       }
     }
   }, [])
+
+  // Handle assignment from Breakdown Drawer
+  const assignBreakdownToSelection = (items: Array<{ title: string }>) => {
+    if (!items || items.length === 0) return
+    const targets = multiSelect.selected.length > 0
+      ? [...multiSelect.selected]
+      : (selectedBlock ? [selectedBlock] : [])
+
+    if (targets.length === 0) return
+
+    const updated = [...timeBlocks]
+    const affected: string[] = []
+    let assignedCount = 0
+
+    for (let i = 0; i < targets.length && i < items.length; i++) {
+      const blockId = targets[i]
+      const idx = updated.findIndex(b => b.id === blockId)
+      if (idx === -1) continue
+      // Skip past or pinned blocks
+      const status = getBlockTimeStatus(blockId)
+      if (status === 'past' || updated[idx].isPinned) continue
+
+      const item = items[i]
+      updated[idx].task = {
+        id: `bd-${Date.now()}-${i}`,
+        title: item.title || `Task ${i+1}`,
+        type: 'custom',
+        color: updated[idx].task?.color || 'bg-blue-500',
+      }
+      updated[idx].isRecentlyMoved = true
+      affected.push(blockId)
+      assignedCount++
+    }
+
+    if (assignedCount === 0) return
+
+    setTimeBlocks(updated)
+    setTimeout(() => {
+      setTimeBlocks(prev => prev.map(b => ({ ...b, isRecentlyMoved: false })))
+    }, 1500)
+
+    const change: TaskChange = {
+      type: 'edit',
+      blockId: affected[0],
+      timestamp: new Date(),
+      affectedBlocks: affected,
+    }
+    setRecentChanges(prev => [change, ...prev.slice(0, 4)])
+    setNotificationType('rescheduled')
+    setShowChangeNotification(true)
+    setTimeout(() => setShowChangeNotification(false), 2000)
+  }
+
+  useEffect(() => {
+    const onAssign = (e: Event) => {
+      try {
+        const detail = (e as CustomEvent).detail as { items?: Array<{ title: string }> }
+        if (detail?.items) assignBreakdownToSelection(detail.items)
+      } catch {}
+    }
+    const onGetSelected = () => {
+      try {
+        const ids = multiSelect.selected.length > 0 ? [...multiSelect.selected] : (selectedBlock ? [selectedBlock] : [])
+        const details = ids.map(id => {
+          const b = timeBlocks.find(tb => tb.id === id)
+          return { id, startTime: b?.startTime, endTime: b?.endTime }
+        })
+        window.dispatchEvent(new CustomEvent('selectedBlocks', { detail: { ids, details } }))
+      } catch {}
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('assignBreakdownToSelection', onAssign as EventListener)
+      window.addEventListener('getSelectedBlocks', onGetSelected as EventListener)
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('assignBreakdownToSelection', onAssign as EventListener)
+        window.removeEventListener('getSelectedBlocks', onGetSelected as EventListener)
+      }
+    }
+  }, [multiSelect.selected, selectedBlock, timeBlocks])
 
   const goalOptions: { id: string; label: string; color: string }[] = [
     { id: 'goal_1', label: dailyGoals[0] || 'Goal 1', color: 'bg-amber-200 text-amber-900' },
@@ -470,6 +385,35 @@ export default function TimeTracker() {
           }
         }
       }
+
+      // If we changed from smaller mode back to 30-minute mode, aggregate content
+      if (prevDuration < 30 && blockDurationMinutes === 30 && prevBlocksRef.current.length) {
+        // Helper to convert HH:MM to minutes from midnight
+        const toMin = (hhmm: string) => {
+          const [h, m] = hhmm.split(":").map(Number)
+          return h * 60 + m
+        }
+        const prevStarts = prevBlocksRef.current.map((b) => toMin(b.startTime))
+        for (let i = 0; i < blocks.length; i++) {
+          const startMin = toMin(blocks[i].startTime)
+          const endMin = toMin(blocks[i].endTime)
+          // Find any previous smaller blocks whose start lies in this 30-min window
+          for (let j = 0; j < prevBlocksRef.current.length; j++) {
+            const ps = prevStarts[j]
+            if (ps >= startMin && ps < endMin) {
+              const prevB = prevBlocksRef.current[j]
+              if (!blocks[i].task && prevB.task) {
+                blocks[i].task = { ...prevB.task }
+              }
+              if (!blocks[i].goal && prevB.goal) {
+                blocks[i].goal = { ...prevB.goal }
+              }
+              // We take the first non-empty smaller block as representative
+              if (blocks[i].task || blocks[i].goal) break
+            }
+          }
+        }
+      }
     } catch (e) {
       console.warn("Remap from 30-min to smaller failed:", e)
     }
@@ -477,6 +421,8 @@ export default function TimeTracker() {
     console.log("Generated time blocks:", blocks.length, "blocks")
     setTimeBlocks(blocks)
   }, [calendarEvents, blockDurationMinutes])
+
+  // Note: DB-backed seeding is disabled until the local blocks API/hook is wired.
 
   // Initialize current time on client side to avoid hydration mismatch
   useEffect(() => {
@@ -1237,9 +1183,6 @@ export default function TimeTracker() {
     const updatedBlocks = [...timeBlocks]
     const affectedBlocks: string[] = []
     
-    // Compute baseTitle once for DB persistence and numbering
-    const baseTitleAll = task.title.replace(/\d+$/, '').trim()
-
     // First, collect all existing tasks that need to be postponed
     const tasksToPostpone: Array<{ task: any; originalIndex: number }> = []
     const blockIndices = blockIds.map(id => updatedBlocks.findIndex(b => b.id === id)).filter(idx => idx !== -1)
@@ -1271,7 +1214,8 @@ export default function TimeTracker() {
           return // do not overwrite pinned
         }
         // Create numbered task title
-        const numberedTitle = `${baseTitleAll} #${taskNumber}`
+        const baseTitle = task.title.replace(/\d+$/, '').trim() // Remove existing numbers
+        const numberedTitle = `${baseTitle} #${taskNumber}`
         
         updatedBlocks[blockIndex].task = {
           ...task,
@@ -1389,17 +1333,6 @@ export default function TimeTracker() {
         timestamp: new Date(),
       }
       setRecentChanges((prev) => [change, ...prev.slice(0, 4)])
-
-      // Phase 2: persist past edit to DB in supported modes
-      if (isDbModeSupported) {
-        const [hh, mm] = existingBlock.startTime.split(":").map((x) => parseInt(x, 10))
-        const startMinute = hh * 60 + mm
-        const endMinute = Math.min(startMinute + stepMinutes, 1440)
-        const dateStr = toDateStrLocal(new Date())
-        void postSetRange(dateStr, startMinute, endMinute, taskTitle)
-          .then(() => refreshDbFrames())
-          .catch(() => {})
-      }
     } else {
       // For current and future blocks, push tasks forward if there's a change
       const isTaskChanged = !existingTask || existingTask.title !== taskTitle
@@ -1425,33 +1358,11 @@ export default function TimeTracker() {
         // Show notification
         setShowChangeNotification(true)
         setTimeout(() => setShowChangeNotification(false), 3000)
-
-        // Phase 2: persist to DB in supported modes
-        if (isDbModeSupported) {
-          const [hh, mm] = existingBlock.startTime.split(":").map((x) => parseInt(x, 10))
-          const startMinute = hh * 60 + mm
-          const endMinute = Math.min(startMinute + stepMinutes, 1440)
-          const dateStr = toDateStrLocal(new Date())
-          void postSetRange(dateStr, startMinute, endMinute, taskTitle)
-            .then(() => refreshDbFrames())
-            .catch(() => {})
-        }
       } else {
         // No change needed, just update the task
         setTimeBlocks((prev) =>
           prev.map((block) => (block.id === editingBlockId ? { ...block, task: newTask } : block)),
         )
-
-        // Phase 2: persist to DB as simple edit
-        if (isDbModeSupported) {
-          const [hh, mm] = existingBlock.startTime.split(":").map((x) => parseInt(x, 10))
-          const startMinute = hh * 60 + mm
-          const endMinute = Math.min(startMinute + stepMinutes, 1440)
-          const dateStr = toDateStrLocal(new Date())
-          void postSetRange(dateStr, startMinute, endMinute, taskTitle)
-            .then(() => refreshDbFrames())
-            .catch(() => {})
-        }
       }
     }
 
@@ -1459,20 +1370,11 @@ export default function TimeTracker() {
     setEditingBlockId(null)
   }
 
-  // Toggle pin/unpin for a block (persisted in DB for supported modes)
+  // Toggle pin/unpin for a block
   const togglePin = (blockId: string) => {
-    setTimeBlocks((prev) => prev.map((b) => (b.id === blockId ? { ...b, isPinned: !b.isPinned } : b)))
-    if (isDbModeSupported) {
-      const blk = timeBlocks.find((b) => b.id === blockId)
-      if (!blk) return
-      const [hh, mm] = blk.startTime.split(":").map((x) => parseInt(x, 10))
-      const startMinute = hh * 60 + mm
-      const dateStr = toDateStrLocal(new Date())
-      const newPinned = !blk.isPinned
-      void postPinRange(dateStr, startMinute, stepMinutes, newPinned)
-        .then(() => refreshDbFrames())
-        .catch(() => {})
-    }
+    setTimeBlocks((prev) =>
+      prev.map((b) => (b.id === blockId ? { ...b, isPinned: !b.isPinned } : b)),
+    )
   }
 
   const handleQuickTaskDelete = () => {
@@ -1643,31 +1545,6 @@ export default function TimeTracker() {
 
     setTimeBlocks(updated)
 
-    // Persist: rename completed block label, and postpone its task by actual gap to next empty slot (mode-aware)
-    if (isDbModeSupported && completedTask) {
-      const dateStr = toDateStrLocal(new Date())
-      const completedBlk = timeBlocks[completedIndex]
-      const [ch, cm] = completedBlk.startTime.split(":").map((x) => parseInt(x, 10))
-      const completedStart = ch * 60 + cm
-      void postRenameRange(dateStr, completedStart, stepMinutes, `${completedTask.title} + pushed to future`).catch(() => {})
-      // Find the same 'place' as in UI and compute delta
-      let place = currentIndex + 1
-      while (place < updated.length && (updated[place].isPinned || updated[place].task)) {
-        place++
-      }
-      if (place < updated.length) {
-        const [ph, pm] = updated[place].startTime.split(":").map((x) => parseInt(x, 10))
-        const placeStart = ph * 60 + pm
-        const delta = Math.max(placeStart - completedStart, stepMinutes)
-        void postPostponeRange(dateStr, completedStart, stepMinutes, delta, false)
-          .then(() => refreshDbFrames())
-          .catch(() => {})
-      } else {
-        // No available place found in UI; skip postpone
-        void refreshDbFrames()
-      }
-    }
-
     // Start next block (pinned planned task) normally
     setIsTimerRunning(true)
     setTimerSeconds(0)
@@ -1816,23 +1693,6 @@ export default function TimeTracker() {
       }
     } else {
       console.log("No valid task to reschedule:", completedBlock?.task?.title)
-    }
-
-    // Persist DB: postpone next block and completed block by 2 steps
-    if (isDbModeSupported) {
-      const dateStr = toDateStrLocal(new Date())
-      const nextBlk = timeBlocks[nextBlockIndex]
-      const compBlk = timeBlocks[completedBlockIndex]
-      if (nextBlk && compBlk) {
-        const [nH, nM] = nextBlk.startTime.split(":").map((x) => parseInt(x, 10))
-        const [cH, cM] = compBlk.startTime.split(":").map((x) => parseInt(x, 10))
-        const nextStart = nH * 60 + nM
-        const compStart = cH * 60 + cM
-        void postPostponeRange(dateStr, nextStart, stepMinutes, 2 * stepMinutes, !!nextIsPinned).catch(() => {})
-        void postPostponeRange(dateStr, compStart, stepMinutes, 2 * stepMinutes, false)
-          .then(() => refreshDbFrames())
-          .catch(() => {})
-      }
     }
 
     // Step 3: Mark the completed block as "Interrupted"
