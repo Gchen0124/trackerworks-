@@ -120,6 +120,13 @@ export default function TimeTracker() {
     selectedBlocks: [],
     taskToFill: null,
   })
+  // Keep a mirror of 1-minute blocks for the full day. This lets us:
+  // - Sync any 30/3-minute edits downward into 1-minute resolution
+  // - Use 1-minute edits locally without affecting higher-level modes
+  const oneMinuteMirrorRef = useRef<TimeBlock[]>([])
+  // Snapshots for restoring exact state when returning to a mode
+  const snapshot30Ref = useRef<TimeBlock[]>([])
+  const snapshot3Ref = useRef<TimeBlock[]>([])
   const [lastAssignedGoalId, setLastAssignedGoalId] = useState<string | null>(null)
 
   // Multi-select and bulk move state
@@ -353,10 +360,49 @@ export default function TimeTracker() {
       }
     })
 
-    // If we just changed from 30-minute mode to a smaller mode, propagate tasks/goals
+    // Restore from snapshots when available; otherwise apply propagation rules
     try {
       const prevDuration = prevDurationRef.current
-      if (prevDuration === 30 && blockDurationMinutes < 30 && prevBlocksRef.current.length) {
+      // 1) If entering 30-min mode, restore from 30-min snapshot (authoritative)
+      if (blockDurationMinutes === 30 && snapshot30Ref.current.length) {
+        const byStart = new Map(snapshot30Ref.current.map((b) => [b.startTime, b]))
+        blocks.forEach((b, i) => {
+          const snap = byStart.get(b.startTime)
+          if (snap) {
+            blocks[i] = { ...b, task: snap.task ? { ...snap.task } : undefined, goal: snap.goal ? { ...snap.goal } : undefined, isPinned: !!snap.isPinned, isCompleted: !!snap.isCompleted }
+          }
+        })
+      }
+
+      // 2) If entering 3-min mode, restore from 3-min snapshot if present
+      if (blockDurationMinutes === 3 && snapshot3Ref.current.length) {
+        const byStart = new Map(snapshot3Ref.current.map((b) => [b.startTime, b]))
+        blocks.forEach((b, i) => {
+          const snap = byStart.get(b.startTime)
+          if (snap) {
+            blocks[i] = { ...b, task: snap.task ? { ...snap.task } : undefined, goal: snap.goal ? { ...snap.goal } : undefined, isPinned: !!snap.isPinned, isCompleted: !!snap.isCompleted }
+          }
+        })
+      }
+      // When switching into 1-minute mode and we have a mirror, prefer using the mirror content
+      if (blockDurationMinutes === 1 && oneMinuteMirrorRef.current.length) {
+        const toMin = (hhmm: string) => {
+          const [h, m] = hhmm.split(":").map(Number)
+          return h * 60 + m
+        }
+        for (let i = 0; i < blocks.length; i++) {
+          const startMin = toMin(blocks[i].startTime)
+          const mirror = oneMinuteMirrorRef.current[startMin]
+          if (mirror) {
+            blocks[i].task = mirror.task ? { ...mirror.task } : undefined
+            blocks[i].goal = mirror.goal ? { ...mirror.goal } : undefined
+            blocks[i].isPinned = !!mirror.isPinned
+            blocks[i].isCompleted = !!mirror.isCompleted
+          }
+        }
+      }
+      // 3) Fallback: if we just changed from 30-minute mode to a smaller mode and no snapshot exists, propagate tasks/goals
+      if (prevDuration === 30 && blockDurationMinutes < 30 && prevBlocksRef.current.length && snapshot3Ref.current.length === 0 && blockDurationMinutes !== 1) {
         // Helper to convert HH:MM to minutes from midnight
         const toMin = (hhmm: string) => {
           const [h, m] = hhmm.split(":").map(Number)
@@ -387,34 +433,9 @@ export default function TimeTracker() {
         }
       }
 
-      // If we changed from smaller mode back to 30-minute mode, aggregate content
-      if (prevDuration < 30 && blockDurationMinutes === 30 && prevBlocksRef.current.length) {
-        // Helper to convert HH:MM to minutes from midnight
-        const toMin = (hhmm: string) => {
-          const [h, m] = hhmm.split(":").map(Number)
-          return h * 60 + m
-        }
-        const prevStarts = prevBlocksRef.current.map((b) => toMin(b.startTime))
-        for (let i = 0; i < blocks.length; i++) {
-          const startMin = toMin(blocks[i].startTime)
-          const endMin = toMin(blocks[i].endTime)
-          // Find any previous smaller blocks whose start lies in this 30-min window
-          for (let j = 0; j < prevBlocksRef.current.length; j++) {
-            const ps = prevStarts[j]
-            if (ps >= startMin && ps < endMin) {
-              const prevB = prevBlocksRef.current[j]
-              if (!blocks[i].task && prevB.task) {
-                blocks[i].task = { ...prevB.task }
-              }
-              if (!blocks[i].goal && prevB.goal) {
-                blocks[i].goal = { ...prevB.goal }
-              }
-              // We take the first non-empty smaller block as representative
-              if (blocks[i].task || blocks[i].goal) break
-            }
-          }
-        }
-      }
+      // Policy: Do NOT aggregate changes from smaller modes back into 30-minute blocks.
+      // Rationale: 30-min blocks represent the high-level plan and only change when edited in 30-min mode.
+      // Therefore, when returning to 30-minute mode, leave blocks as-is (DB/state preserves prior 30-min values).
     } catch (e) {
       console.warn("Remap from 30-min to smaller failed:", e)
     }
@@ -422,6 +443,76 @@ export default function TimeTracker() {
     console.log("Generated time blocks:", blocks.length, "blocks")
     setTimeBlocks(blocks)
   }, [calendarEvents, blockDurationMinutes])
+
+  // Keep 1-minute mirror in sync with current view's edits
+  useEffect(() => {
+    const toMin = (hhmm: string) => {
+      const [h, m] = hhmm.split(":").map(Number)
+      return h * 60 + m
+    }
+
+    const totalMinutesInDay = 24 * 60
+    // Initialize full-day mirror if needed
+    if (oneMinuteMirrorRef.current.length !== totalMinutesInDay) {
+      const arr: TimeBlock[] = []
+      for (let m = 0; m < totalMinutesInDay; m++) {
+        const hh = Math.floor(m / 60).toString().padStart(2, '0')
+        const mm = (m % 60).toString().padStart(2, '0')
+        const start = `${hh}:${mm}`
+        const endMin = m + 1
+        const eh = Math.floor(endMin / 60).toString().padStart(2, '0')
+        const em = (endMin % 60).toString().padStart(2, '0')
+        arr.push({
+          id: `m${m}`,
+          startTime: start,
+          endTime: `${eh}:${em}`,
+          isActive: false,
+          isCompleted: false,
+          isPinned: false,
+        } as TimeBlock)
+      }
+      oneMinuteMirrorRef.current = arr
+    }
+
+    if (blockDurationMinutes === 1) {
+      // In 1-minute mode, mirror equals current blocks
+      for (const b of timeBlocks) {
+        const idx = toMin(b.startTime)
+        if (oneMinuteMirrorRef.current[idx]) {
+          oneMinuteMirrorRef.current[idx] = { ...oneMinuteMirrorRef.current[idx], task: b.task ? { ...b.task } : undefined, goal: b.goal ? { ...b.goal } : undefined, isPinned: !!b.isPinned, isCompleted: !!b.isCompleted }
+        }
+      }
+      return
+    }
+
+    // In 3- or 30-minute modes, push changes down to all covered 1-minute blocks
+    for (const b of timeBlocks) {
+      const start = toMin(b.startTime)
+      const end = toMin(b.endTime)
+      for (let m = start; m < end; m++) {
+        const mirror = oneMinuteMirrorRef.current[m]
+        if (!mirror) continue
+        mirror.task = b.task ? { ...b.task } : undefined
+        mirror.goal = b.goal ? { ...b.goal } : undefined
+        mirror.isPinned = !!b.isPinned
+        mirror.isCompleted = !!b.isCompleted
+      }
+    }
+  }, [timeBlocks, blockDurationMinutes])
+
+  // Snapshot the current mode's blocks so we can restore when returning to that mode
+  useEffect(() => {
+    const deepCopy = (b: TimeBlock): TimeBlock => ({
+      ...b,
+      task: b.task ? { ...b.task } : undefined,
+      goal: b.goal ? { ...b.goal } : undefined,
+    })
+    if (blockDurationMinutes === 30) {
+      snapshot30Ref.current = timeBlocks.map(deepCopy)
+    } else if (blockDurationMinutes === 3) {
+      snapshot3Ref.current = timeBlocks.map(deepCopy)
+    }
+  }, [timeBlocks, blockDurationMinutes])
 
   // Note: DB-backed seeding is disabled until the local blocks API/hook is wired.
 
@@ -1422,6 +1513,17 @@ export default function TimeTracker() {
     // Snapshot current layout before switching
     prevBlocksRef.current = timeBlocks
     prevDurationRef.current = blockDurationMinutes
+    // Explicitly snapshot current mode for reliable restore when returning
+    const deepCopy = (b: TimeBlock): TimeBlock => ({
+      ...b,
+      task: b.task ? { ...b.task } : undefined,
+      goal: b.goal ? { ...b.goal } : undefined,
+    })
+    if (blockDurationMinutes === 30) {
+      snapshot30Ref.current = timeBlocks.map(deepCopy)
+    } else if (blockDurationMinutes === 3) {
+      snapshot3Ref.current = timeBlocks.map(deepCopy)
+    }
     setBlockDurationMinutes(newDuration)
     setShowDurationSelector(false)
     // Clear any existing tasks when changing duration to avoid confusion
