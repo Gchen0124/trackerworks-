@@ -120,6 +120,9 @@ export default function TimeTracker() {
     selectedBlocks: [],
     taskToFill: null,
   })
+  // Half-hour voice alerts (male TTS) toggle
+  const [enableHalfHourAlerts, setEnableHalfHourAlerts] = useState(false)
+  const lastHalfHourAnnouncedRef = useRef<string | null>(null)
   // Keep a mirror of 1-minute blocks for the full day. This lets us:
   // - Sync any 30/3-minute edits downward into 1-minute resolution
   // - Use 1-minute edits locally without affecting higher-level modes
@@ -507,6 +510,112 @@ export default function TimeTracker() {
       }
     }
   }, [timeBlocks, blockDurationMinutes])
+
+  // --- Half-hour Voice Alerts Scheduler (:29 and :59) ---
+  const speakFallback = (text: string) => {
+    try {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        const utter = new SpeechSynthesisUtterance(text)
+        // Prefer a male-sounding English voice if available
+        const voices = window.speechSynthesis.getVoices()
+        const enMale = voices.find(v => /en/i.test(v.lang) && /male/i.test((v as any).name || ''))
+        if (enMale) utter.voice = enMale
+        window.speechSynthesis.speak(utter)
+      }
+    } catch {}
+  }
+
+  const playMaleTts = async (text: string) => {
+    try {
+      const ctrl = new AbortController()
+      const to = setTimeout(() => ctrl.abort(), 8000)
+      const res = await fetch('/api/tts/male', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, format: 'mp3' }),
+        signal: ctrl.signal,
+      })
+      clearTimeout(to)
+      if (!res.ok) throw new Error('tts_failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      await audio.play().catch(() => speakFallback(text))
+      // Revoke later (no leak for short-lived URL)
+      setTimeout(() => URL.revokeObjectURL(url), 30000)
+    } catch {
+      speakFallback(text)
+    }
+  }
+
+  // Short joyful chime before announcing (longer + louder)
+  const playJoyfulChime = async () => {
+    try {
+      const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext
+      if (!AudioCtx) return
+      const ctx = new AudioCtx()
+      const now = ctx.currentTime
+      const master = ctx.createGain()
+      // Max volume; envelope per-note prevents clicks
+      master.gain.value = 1.0
+      master.connect(ctx.destination)
+
+      const notes = [523.25, 659.25, 783.99] // C5, E5, G5
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.type = 'sine'
+        osc.frequency.value = freq
+        const t0 = now + i * 0.25
+        const t1 = t0 + 0.6
+        gain.gain.setValueAtTime(0, t0)
+        gain.gain.linearRampToValueAtTime(1.0, t0 + 0.03)
+        gain.gain.exponentialRampToValueAtTime(0.001, t1)
+        osc.connect(gain)
+        gain.connect(master)
+        osc.start(t0)
+        osc.stop(t1 + 0.01)
+      })
+      // Auto close after ~1.3s
+      await new Promise((r) => setTimeout(r, 1300))
+      try { ctx.close() } catch {}
+    } catch {}
+  }
+
+   
+
+  useEffect(() => {
+    if (!enableHalfHourAlerts) return
+    if (!currentTime) return
+    if (showProgressCheck) return // avoid conflict with progress popup
+
+    const now = currentTime
+    const m = now.getMinutes()
+    const s = now.getSeconds()
+    if (!(m === 29 || m === 59)) return
+    // Only trigger near the top of the minute to avoid multiple fires
+    if (s > 5) return
+
+    const key = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}-${m}`
+    if (lastHalfHourAnnouncedRef.current === key) return
+    lastHalfHourAnnouncedRef.current = key
+
+    const hh = now.getHours()
+    ;(async () => {
+      // Play chime first
+      await playJoyfulChime()
+      // If popup opened during chime, skip announcement
+      if (showProgressCheck) return
+      if (m === 29) {
+        const target = `${hh.toString().padStart(2, '0')}:30`
+        await playMaleTts(`cheer up, it's almost ${target}`)
+      } else {
+        const nextHour = (hh + 1) % 24
+        const target = `${nextHour.toString().padStart(2, '0')}:00`
+        await playMaleTts(`cheer up, it's almost ${target}`)
+      }
+    })()
+  }, [currentTime, enableHalfHourAlerts, showProgressCheck])
 
   // Snapshot the current mode's blocks so we can restore when returning to that mode
   useEffect(() => {
@@ -1983,11 +2092,8 @@ export default function TimeTracker() {
                   className="flex items-center gap-2 min-w-32"
                 >
                   <span className="font-medium">{blockDurationMinutes} minutes</span>
-                  <span className="text-xs text-gray-500">
-                    ({blockDurationOptions.find((opt) => opt.value === blockDurationMinutes)?.description})
-                  </span>
+                  <span className="text-xs text-gray-500">({blocksPerHour} per hour)</span>
                 </Button>
-
                 {showDurationSelector && (
                   <div className="absolute top-full left-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-80">
                     <div className="p-2">
@@ -2011,8 +2117,24 @@ export default function TimeTracker() {
                   </div>
                 )}
               </div>
-              <div className="text-sm text-gray-500">
-                Current block: {currentBlock?.startTime} - {currentBlock?.endTime}
+              <div className="ml-auto flex items-center gap-2">
+                <span className="text-sm font-medium">Half-hour Alerts:</span>
+                <Button
+                  variant={enableHalfHourAlerts ? "default" : "secondary"}
+                  onClick={() => setEnableHalfHourAlerts((v) => !v)}
+                  className="min-w-28"
+                  title="Announce at :29 and :59 using a male voice"
+                >
+                  {enableHalfHourAlerts ? "On" : "Off"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={triggerNextHalfHourAlert}
+                  title="Play the chime and announce the next upcoming half-hour"
+                >
+                  Test
+                </Button>
               </div>
             </div>
           </CardContent>
