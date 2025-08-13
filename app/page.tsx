@@ -111,7 +111,31 @@ export default function TimeTracker() {
     isDragging: false,
     isExpandMode: false,
   })
-  
+
+  // Manually trigger the next upcoming half-hour alert (for testing)
+  const triggerNextHalfHourAlert = async () => {
+    try {
+      const now = new Date()
+      const m = now.getMinutes()
+      const hh = now.getHours()
+      await playJoyfulChime()
+      // Respect popup gating to simulate real behavior
+      if (showProgressCheck) return
+      if (m < 29) {
+        const target = `${hh.toString().padStart(2, '0')}:30`
+        const text = `cheer up, it's almost ${target}`
+        maybeShowSystemNotification(text)
+        await playMaleTts(text)
+      } else {
+        const nextHour = (hh + 1) % 24
+        const target = `${nextHour.toString().padStart(2, '0')}:00`
+        const text = `cheer up, it's almost ${target}`
+        maybeShowSystemNotification(text)
+        await playMaleTts(text)
+      }
+    } catch {}
+  }
+
   // Planning mode state
   const [planningMode, setPlanningMode] = useState<PlanningMode>({
     isActive: false,
@@ -582,6 +606,16 @@ export default function TimeTracker() {
     } catch {}
   }
 
+  // Try to show a system notification (helps when tab is backgrounded)
+  const maybeShowSystemNotification = (body: string) => {
+    try {
+      if (typeof window === 'undefined') return
+      if (!('Notification' in window)) return
+      if (Notification.permission !== 'granted') return
+      new Notification('Time Reminder', { body, silent: false })
+    } catch {}
+  }
+
    
 
   useEffect(() => {
@@ -608,11 +642,15 @@ export default function TimeTracker() {
       if (showProgressCheck) return
       if (m === 29) {
         const target = `${hh.toString().padStart(2, '0')}:30`
-        await playMaleTts(`cheer up, it's almost ${target}`)
+        const text = `cheer up, it's almost ${target}`
+        maybeShowSystemNotification(text)
+        await playMaleTts(text)
       } else {
         const nextHour = (hh + 1) % 24
         const target = `${nextHour.toString().padStart(2, '0')}:00`
-        await playMaleTts(`cheer up, it's almost ${target}`)
+        const text = `cheer up, it's almost ${target}`
+        maybeShowSystemNotification(text)
+        await playMaleTts(text)
       }
     })()
   }, [currentTime, enableHalfHourAlerts, showProgressCheck])
@@ -636,6 +674,17 @@ export default function TimeTracker() {
   // Initialize current time on client side to avoid hydration mismatch
   useEffect(() => {
     setCurrentTime(new Date())
+  }, [])
+
+  // Request Notification permission upfront so alerts can surface during screensaver/background
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined') return
+      if (!('Notification' in window)) return
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {})
+      }
+    } catch {}
   }, [])
 
   // Update current time and handle block transitions
