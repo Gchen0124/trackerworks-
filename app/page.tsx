@@ -430,7 +430,39 @@ export default function TimeTracker() {
           }
         }
       }
-      // 3) Fallback: if we just changed from 30-minute mode to a smaller mode and no snapshot exists, propagate tasks/goals
+      // 2b) If entering 1-minute mode but mirror is empty, propagate from previous 30-min blocks
+      if (
+        prevDuration === 30 &&
+        blockDurationMinutes === 1 &&
+        prevBlocksRef.current.length &&
+        oneMinuteMirrorRef.current.length === 0
+      ) {
+        const toMin = (hhmm: string) => {
+          const [h, m] = hhmm.split(":").map(Number)
+          return h * 60 + m
+        }
+        const newStarts = blocks.map((b) => toMin(b.startTime))
+        for (const prev of prevBlocksRef.current) {
+          const pStart = toMin(prev.startTime)
+          const pEnd = toMin(prev.endTime)
+          const hasContent = !!prev.task || !!prev.goal
+          if (!hasContent) continue
+          for (let i = 0; i < blocks.length; i++) {
+            const ns = newStarts[i]
+            if (ns >= pStart && ns < pEnd) {
+              if (!blocks[i].task && prev.task) {
+                blocks[i].task = { ...prev.task }
+                // Propagate pin when the task is copied from 30-min block
+                if (prev.isPinned) blocks[i].isPinned = true
+              }
+              if (!blocks[i].goal && prev.goal) {
+                blocks[i].goal = { ...prev.goal }
+              }
+            }
+          }
+        }
+      }
+      // 3) Fallback: if we just changed from 30-minute mode to a smaller mode and no snapshot exists, propagate tasks/goals/pins
       if (prevDuration === 30 && blockDurationMinutes < 30 && prevBlocksRef.current.length && snapshot3Ref.current.length === 0 && blockDurationMinutes !== 1) {
         // Helper to convert HH:MM to minutes from midnight
         const toMin = (hhmm: string) => {
@@ -449,10 +481,10 @@ export default function TimeTracker() {
             const ns = newStarts[i]
             // Fill blocks whose start lies within the previous 30-min window
             if (ns >= pStart && ns < pEnd) {
-              if (!blocks[i].task) {
-                if (prev.task) {
-                  blocks[i].task = { ...prev.task }
-                }
+              if (!blocks[i].task && prev.task) {
+                blocks[i].task = { ...prev.task }
+                // Propagate pin when the task is copied from 30-min block
+                if (prev.isPinned) blocks[i].isPinned = true
               }
               if (!blocks[i].goal && prev.goal) {
                 blocks[i].goal = { ...prev.goal }
@@ -661,6 +693,8 @@ export default function TimeTracker() {
       ...b,
       task: b.task ? { ...b.task } : undefined,
       goal: b.goal ? { ...b.goal } : undefined,
+      isPinned: !!b.isPinned,
+      isCompleted: !!b.isCompleted,
     })
     if (blockDurationMinutes === 30) {
       snapshot30Ref.current = timeBlocks.map(deepCopy)
@@ -1686,6 +1720,8 @@ export default function TimeTracker() {
       ...b,
       task: b.task ? { ...b.task } : undefined,
       goal: b.goal ? { ...b.goal } : undefined,
+      isPinned: !!b.isPinned,
+      isCompleted: !!b.isCompleted,
     })
     if (blockDurationMinutes === 30) {
       snapshot30Ref.current = timeBlocks.map(deepCopy)
