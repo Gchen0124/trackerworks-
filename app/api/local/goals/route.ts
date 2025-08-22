@@ -2,7 +2,9 @@ import { NextRequest } from "next/server"
 import { sqlite } from "@/lib/db"
 
 function formatDate(d: string | Date) {
-  const dd = typeof d === "string" ? new Date(d) : d
+  // If a string in YYYY-MM-DD is provided, assume it is the intended date and return as-is.
+  if (typeof d === "string") return d.slice(0, 10)
+  const dd = d
   return new Date(dd.getTime() - dd.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
 }
 

@@ -1,7 +1,6 @@
 "use client"
 
 import React, { useCallback, useEffect, useMemo, useState } from "react"
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -85,6 +84,26 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     loadGoals()
   }, [open, loadGoals, refreshKey])
 
+  // Keep goal labels in sync with the top DailyGoals panel via event
+  useEffect(() => {
+    const onDailyGoalsUpdated = (e: Event) => {
+      try {
+        const detail = (e as CustomEvent).detail as { goals?: string[] }
+        if (detail?.goals && Array.isArray(detail.goals)) {
+          setGoals([detail.goals[0] || "", detail.goals[1] || "", detail.goals[2] || ""])
+        }
+      } catch {}
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('dailyGoalsUpdated', onDailyGoalsUpdated as EventListener)
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('dailyGoalsUpdated', onDailyGoalsUpdated as EventListener)
+      }
+    }
+  }, [])
+
   // Load list for a goal + parent
   const loadList = useCallback(async (goalKey: GoalKey, parentId: string | null) => {
     const k = keyFor(goalKey, parentId)
@@ -153,73 +172,78 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="h-full bg-zinc-950 text-zinc-100 border-l border-zinc-800 p-0 sm:max-w-[500px]">
-        <div className="h-full flex flex-col">
-          <div className="p-3 border-b border-zinc-800 bg-zinc-950/80">
-            <SheetHeader>
-              <SheetTitle className="text-zinc-100">Todos</SheetTitle>
-            </SheetHeader>
-            <div className="text-xs text-zinc-400 mt-1">Quick checklist for your daily goals. Reserved space above for notes/AI.</div>
-          </div>
-
-          {/* Reserved notes/AI area */}
-          <div className="px-3 py-2 border-b border-zinc-900/60">
-            <div className="h-16 rounded-md bg-zinc-900/40 border border-zinc-800 flex items-center justify-center text-xs text-zinc-500">
-              Notes / AI chat coming soon
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-auto p-3 space-y-3">
-            {([0,1,2] as const).map((index) => {
-              const goalKey = goalKeyForIndex(index)
-              const agg = aggregateForKey(goalKey)
-              const goalChecked: boolean | 'indeterminate' = agg.some ? 'indeterminate' : agg.all
-
-              return (
-                <div key={index} className="rounded-lg border border-zinc-800 bg-zinc-950/60">
-                  <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Checkbox
-                        checked={goalChecked as any}
-                        onCheckedChange={(v) => toggleGoal(goalKey, Boolean(v))}
-                        className="data-[state=indeterminate]:bg-zinc-700"
-                      />
-                      <div className="font-medium text-zinc-100 truncate" title={labelForIndex(index)}>{labelForIndex(index)}</div>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button size="icon" variant="ghost" className="text-zinc-400 hover:text-zinc-200" onClick={() => setRefreshKey(k => k + 1)} title="Refresh">
-                        <RefreshCw className="w-4 h-4" />
-                      </Button>
-                      <Button size="sm" variant="ghost" className="text-zinc-300 hover:text-white" onClick={() => loadList(goalKey, null)}>
-                        <ChevronRight className="w-4 h-4 mr-1" /> Reload
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="px-3 py-2">
-                    <List
-                      goalKey={goalKey}
-                      parentId={null}
-                      keyFor={keyFor}
-                      tree={tree}
-                      loading={loading}
-                      expanded={expanded}
-                      setExpanded={setExpanded}
-                      loadList={loadList}
-                      saveChildren={saveChildren}
-                      updateTitle={updateTitle}
-                      deleteItem={deleteItem}
-                      isChecked={isChecked}
-                      setChecked={setChecked}
-                    />
-                  </div>
-                </div>
-              )
-            })}
+    <div className={"fixed inset-y-0 left-0 w-80 bg-zinc-950 text-zinc-100 border-r border-zinc-800 p-0 " + (!open ? "hidden" : "")}>
+      <div className="h-full flex flex-col">
+        <div className="p-3 border-b border-zinc-800 bg-zinc-950/80 flex items-center justify-between">
+          <div className="text-zinc-100 font-semibold">Todos</div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="ghost" className="text-zinc-300 hover:text-white" onClick={() => setRefreshKey(k => k + 1)} title="Refresh">
+              <RefreshCw className="w-4 h-4" />
+            </Button>
+            {onOpenChange && (
+              <Button size="sm" variant="ghost" className="text-zinc-400 hover:text-white" onClick={() => onOpenChange(false)} title="Hide">
+                Hide
+              </Button>
+            )}
           </div>
         </div>
-      </SheetContent>
-    </Sheet>
+
+        {/* Reserved notes/AI area */}
+        <div className="px-3 py-2 border-b border-zinc-900/60">
+          <div className="h-16 rounded-md bg-zinc-900/40 border border-zinc-800 flex items-center justify-center text-xs text-zinc-500">
+            Notes / AI chat coming soon
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto p-3 space-y-3">
+          {([0,1,2] as const).map((index) => {
+            const goalKey = goalKeyForIndex(index)
+            const agg = aggregateForKey(goalKey)
+            const goalChecked: boolean | 'indeterminate' = agg.some ? 'indeterminate' : agg.all
+
+            return (
+              <div key={index} className="rounded-lg border border-zinc-800 bg-zinc-950/60">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Checkbox
+                      checked={goalChecked as any}
+                      onCheckedChange={(v) => toggleGoal(goalKey, Boolean(v))}
+                      className="data-[state=indeterminate]:bg-zinc-700"
+                    />
+                    <div className="font-medium text-zinc-100 truncate" title={labelForIndex(index)}>{labelForIndex(index)}</div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button size="icon" variant="ghost" className="text-zinc-400 hover:text-zinc-200" onClick={() => setRefreshKey(k => k + 1)} title="Refresh">
+                      <RefreshCw className="w-4 h-4" />
+                    </Button>
+                    <Button size="sm" variant="ghost" className="text-zinc-300 hover:text-white" onClick={() => loadList(goalKey, null)}>
+                      <ChevronRight className="w-4 h-4 mr-1" /> Reload
+                    </Button>
+                  </div>
+                </div>
+                <div className="px-3 py-2">
+                  <List
+                    goalKey={goalKey}
+                    parentId={null}
+                    keyFor={keyFor}
+                    tree={tree}
+                    loading={loading}
+                    expanded={expanded}
+                    setExpanded={setExpanded}
+                    loadList={loadList}
+                    saveChildren={saveChildren}
+                    updateTitle={updateTitle}
+                    deleteItem={deleteItem}
+                    isChecked={isChecked}
+                    setChecked={setChecked}
+                  />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
   )
 }
 

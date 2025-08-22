@@ -106,8 +106,8 @@ export default function TimeTracker() {
   const [notificationType, setNotificationType] = useState<"rescheduled" | "disrupted" | "paused">("rescheduled")
   
   // Nested todos side panel
-  const [showNestedTodos, setShowNestedTodos] = useState(false)
-  
+  const [showNestedTodos, setShowNestedTodos] = useState(true)
+
   // Drag and drop state for planning feature
   const [dragState, setDragState] = useState<DragState>({
     sourceBlockId: null,
@@ -2053,7 +2053,7 @@ export default function TimeTracker() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
+    <div className={cn("min-h-screen bg-gray-50 p-4", showNestedTodos ? "pl-80" : "")}>
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Drag Mode Instructions */}
         {dragState.isDragging && (
@@ -2110,9 +2110,9 @@ export default function TimeTracker() {
               <Mic className="h-4 w-4" />
               Voice Assistant
             </Button>
-            <Button variant="outline" className="flex items-center gap-2" onClick={() => setShowNestedTodos((v) => !v)}>
+            <Button variant="outline" className="flex items-center gap-2" onClick={() => setShowNestedTodos(v => !v)}>
               <ListChecks className="h-4 w-4" />
-              Todos
+              {showNestedTodos ? "Hide Todos" : "Show Todos"}
             </Button>
             <Button variant="outline" className="flex items-center gap-2" onClick={exportTodayCsv}>
               Export CSV
