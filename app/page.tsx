@@ -1655,10 +1655,13 @@ export default function TimeTracker() {
   }
 
   // Toggle pin/unpin for a block
-  const togglePin = (blockId: string) => {
-    setTimeBlocks((prev) =>
-      prev.map((b) => (b.id === blockId ? { ...b, isPinned: !b.isPinned } : b)),
-    )
+  const togglePin = async (blockId: string) => {
+    setTimeBlocks((prev) => prev.map((b) => (b.id === blockId ? { ...b, isPinned: !b.isPinned } : b)))
+    try {
+      const blk = timeBlocks.find(b => b.id === blockId)
+      const nextPinned = !(blk?.isPinned)
+      await fetch('/api/local/time-blocks/pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blockId, pinned: nextPinned }) })
+    } catch {}
   }
 
   const handleQuickTaskDelete = () => {
@@ -1759,7 +1762,7 @@ export default function TimeTracker() {
   }
 
   // Handle block completion and show progress check
-  const handleBlockCompletion = (completedBlock: TimeBlock, nextBlockId: string) => {
+  const handleBlockCompletion = async (completedBlock: TimeBlock, nextBlockId: string) => {
     console.log("handleBlockCompletion called:", { completedBlockId, nextBlockId, time: new Date().toISOString() })
 
     // Stop current timer
@@ -1769,6 +1772,8 @@ export default function TimeTracker() {
     setTimeBlocks((prev) =>
       prev.map((block) => (block.id === completedBlock.id ? { ...block, isActive: false, isCompleted: true } : block)),
     )
+    // Persist block status locally
+    try { await fetch('/api/local/time-blocks/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blockId: completedBlock.id, status: 'completed' }) }) } catch {}
 
     // Voice alert
     const now = new Date()

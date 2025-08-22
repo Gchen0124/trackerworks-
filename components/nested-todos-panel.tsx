@@ -84,6 +84,26 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     loadGoals()
   }, [open, loadGoals, refreshKey])
 
+  // Sync goal labels live when DailyGoals broadcasts updates
+  useEffect(() => {
+    const onDailyGoalsUpdated = (e: Event) => {
+      try {
+        const detail = (e as CustomEvent).detail as { goals?: string[] }
+        if (detail?.goals && Array.isArray(detail.goals)) {
+          setGoals([detail.goals[0] || "", detail.goals[1] || "", detail.goals[2] || ""])
+        }
+      } catch {}
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('dailyGoalsUpdated', onDailyGoalsUpdated as EventListener)
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('dailyGoalsUpdated', onDailyGoalsUpdated as EventListener)
+      }
+    }
+  }, [])
+
   // Keep goal labels in sync with the top DailyGoals panel via event
   useEffect(() => {
     const onDailyGoalsUpdated = (e: Event) => {
