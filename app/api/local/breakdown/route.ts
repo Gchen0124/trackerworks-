@@ -22,7 +22,14 @@ export async function GET(req: NextRequest) {
 
   let where = ""
   const args: any[] = []
-  if (parentId) { where += (where ? " AND " : " WHERE ") + "parent_id = ?"; args.push(parentId) }
+  if (parentId !== null) {
+    // If a specific parentId is provided, fetch only its children
+    where += (where ? " AND " : " WHERE ") + "parent_id = ?"
+    args.push(parentId)
+  } else {
+    // When no parentId is provided, we want only top-level items
+    where += (where ? " AND " : " WHERE ") + "parent_id IS NULL"
+  }
   if (goalId) { where += (where ? " AND " : " WHERE ") + "goal_id = ?"; args.push(goalId) }
   if (scopeType) { where += (where ? " AND " : " WHERE ") + "scope_type = ?"; args.push(scopeType) }
 
@@ -46,7 +53,13 @@ export async function POST(req: NextRequest) {
       // Delete existing children for this scope
       let where = "scope_type = ?"
       const args: any[] = [scopeType]
-      if (parentId) { where += " AND parent_id = ?"; args.push(parentId) }
+      if (typeof parentId === 'string') {
+        where += " AND parent_id = ?"
+        args.push(parentId)
+      } else {
+        // Replace only top-level items when no parentId is provided
+        where += " AND parent_id IS NULL"
+      }
       if (goalId) { where += " AND goal_id = ?"; args.push(goalId) }
       sqlite.prepare(`DELETE FROM breakdown_items WHERE ${where}`).run(...args)
 
