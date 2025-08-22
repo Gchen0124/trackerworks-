@@ -6,7 +6,7 @@ import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Play, Pause, Square, Mic, Calendar, Database, ArrowRight, Undo2, Clock, Settings, Pin, PinOff } from "lucide-react"
+import { Play, Pause, Square, Mic, Calendar, Database, ArrowRight, Undo2, Clock, Settings, Pin, PinOff, ListChecks } from "lucide-react"
 import { cn } from "@/lib/utils"
 import TaskSelector from "@/components/task-selector"
 import VoiceInterface from "@/components/voice-interface"
@@ -14,6 +14,7 @@ import NotionTasks from "@/components/notion-tasks"
 import QuickTaskInput from "@/components/quick-task-input"
 import ProgressCheckPopup from "@/components/progress-check-popup"
 import DailyGoals from "@/components/daily-goals"
+import NestedTodosPanel from "@/components/nested-todos-panel"
 
 interface TimeBlock {
   id: string
@@ -103,6 +104,9 @@ export default function TimeTracker() {
   const [completedBlockId, setCompletedBlockId] = useState<string | null>(null)
   const [audioContext, setAudioContext] = useState<AudioContext | null>(null)
   const [notificationType, setNotificationType] = useState<"rescheduled" | "disrupted" | "paused">("rescheduled")
+  
+  // Nested todos side panel
+  const [showNestedTodos, setShowNestedTodos] = useState(false)
   
   // Drag and drop state for planning feature
   const [dragState, setDragState] = useState<DragState>({
@@ -314,30 +318,9 @@ export default function TimeTracker() {
     { id: 'goal_3', label: dailyGoals[2] || 'Goal 3', color: 'bg-indigo-200 text-indigo-900' },
   ]
 
-  // Mock calendar events
-  const [calendarEvents] = useState<CalendarEvent[]>([
-    {
-      id: "1",
-      title: "Team Meeting",
-      startTime: "09:00",
-      endTime: "10:00",
-      color: "bg-blue-500",
-    },
-    {
-      id: "2",
-      title: "Project Review",
-      startTime: "14:30",
-      endTime: "15:30",
-      color: "bg-green-500",
-    },
-    {
-      id: "3",
-      title: "Client Call",
-      startTime: "16:00",
-      endTime: "17:00",
-      color: "bg-purple-500",
-    },
-  ])
+  // Calendar events: none by default (no placeholders).
+  // Integrations or user actions should populate this state.
+  const [calendarEvents] = useState<CalendarEvent[]>([])
 
   // Generate time blocks based on configurable duration
   useEffect(() => {
@@ -570,14 +553,15 @@ export default function TimeTracker() {
   // --- Half-hour Voice Alerts Scheduler (:29 and :59) ---
   const speakFallback = (text: string) => {
     try {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        const utter = new SpeechSynthesisUtterance(text)
-        // Prefer a male-sounding English voice if available
-        const voices = window.speechSynthesis.getVoices()
-        const enMale = voices.find(v => /en/i.test(v.lang) && /male/i.test((v as any).name || ''))
-        if (enMale) utter.voice = enMale
-        window.speechSynthesis.speak(utter)
-      }
+      if (typeof window === 'undefined') return
+      if (!('speechSynthesis' in window)) return
+      if (Notification.permission !== 'granted') return
+      const utter = new SpeechSynthesisUtterance(text)
+      // Prefer a male-sounding English voice if available
+      const voices = window.speechSynthesis.getVoices()
+      const enMale = voices.find(v => /en/i.test(v.lang) && /male/i.test((v as any).name || ''))
+      if (enMale) utter.voice = enMale
+      window.speechSynthesis.speak(utter)
     } catch {}
   }
 
@@ -1439,6 +1423,7 @@ export default function TimeTracker() {
     // Postpone the displaced tasks to empty, non-pinned blocks after the filled range
     let postponeIdx = lastBlockIdx + 1
     tasksToPostpone.forEach(({ task }) => {
+      // Find next available non-pinned empty block
       while (
         postponeIdx < updatedBlocks.length &&
         (updatedBlocks[postponeIdx].isPinned || updatedBlocks[postponeIdx].task)
@@ -1775,7 +1760,7 @@ export default function TimeTracker() {
 
   // Handle block completion and show progress check
   const handleBlockCompletion = (completedBlock: TimeBlock, nextBlockId: string) => {
-    console.log("handleBlockCompletion called:", { completedBlock: completedBlock.id, nextBlockId })
+    console.log("handleBlockCompletion called:", { completedBlockId, nextBlockId, time: new Date().toISOString() })
 
     // Stop current timer
     setIsTimerRunning(false)
@@ -2124,6 +2109,10 @@ export default function TimeTracker() {
             <Button variant="outline" onClick={() => setShowVoiceInterface(true)} className="flex items-center gap-2">
               <Mic className="h-4 w-4" />
               Voice Assistant
+            </Button>
+            <Button variant="outline" className="flex items-center gap-2" onClick={() => setShowNestedTodos((v) => !v)}>
+              <ListChecks className="h-4 w-4" />
+              Todos
             </Button>
             <Button variant="outline" className="flex items-center gap-2" onClick={exportTodayCsv}>
               Export CSV
@@ -2637,6 +2626,8 @@ export default function TimeTracker() {
             }}
           />
         )}
+        {/* Nested Todos Side Panel */}
+        <NestedTodosPanel open={showNestedTodos} onOpenChange={setShowNestedTodos} />
         {/* Quick Task Input */}
         <QuickTaskInput
           isOpen={showQuickInput}

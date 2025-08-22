@@ -1,0 +1,390 @@
+"use client"
+
+import React, { useCallback, useEffect, useMemo, useState } from "react"
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Plus, Trash2, ChevronRight, ChevronDown, RefreshCw } from "lucide-react"
+
+// Minimal breakdown item shape we use in the UI
+interface ItemRow {
+  id: string
+  title: string
+  order_index?: number
+}
+
+type GoalKey = "goal1" | "goal2" | "goal3"
+
+interface NestedTodosPanelProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}
+
+export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPanelProps) {
+  const [goals, setGoals] = useState<string[]>(["", "", ""]) // [goal1, goal2, goal3]
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [tree, setTree] = useState<Record<string, ItemRow[]>>({}) // key = `${goalKey}|${parentId||"root"}`
+  const [loading, setLoading] = useState<Record<string, boolean>>({})
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  // Local done state persisted in localStorage
+  const STORAGE_KEY = "nestedTodosDone:v1"
+  const [doneMap, setDoneMap] = useState<Record<string, boolean>>({})
+
+  // YYYY-MM-DD based on local time
+  const dateStr = useMemo(() => {
+    const now = new Date()
+    const y = now.getFullYear()
+    const m = (now.getMonth() + 1).toString().padStart(2, "0")
+    const d = now.getDate().toString().padStart(2, "0")
+    return `${y}-${m}-${d}`
+  }, [])
+
+  const goalIdFor = useCallback((goalKey: GoalKey) => `${dateStr}#${goalKey}` as const, [dateStr])
+  const keyFor = useCallback((goalKey: GoalKey, parentId: string | null) => `${goalKey}|${parentId || "root"}`, [])
+
+  // Load/save done states
+  useEffect(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null
+      if (raw) {
+        const data = JSON.parse(raw)
+        if (data && typeof data === 'object') setDoneMap(data)
+      }
+    } catch {}
+  }, [])
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') localStorage.setItem(STORAGE_KEY, JSON.stringify(doneMap))
+    } catch {}
+  }, [doneMap])
+
+  const isChecked = useCallback((id: string) => !!doneMap[id], [doneMap])
+  const setChecked = useCallback((id: string, v: boolean) => {
+    setDoneMap(prev => ({ ...prev, [id]: v }))
+  }, [])
+
+  // Load today's goals
+  const loadGoals = useCallback(async () => {
+    try {
+      const qs = new URLSearchParams()
+      qs.set("date", dateStr)
+      const res = await fetch(`/api/local/goals?${qs.toString()}`)
+      if (!res.ok) throw new Error("failed_goals")
+      const data = await res.json()
+      const arr: string[] = Array.isArray(data?.goals) ? data.goals : ["", "", ""]
+      setGoals([arr[0] || "", arr[1] || "", arr[2] || ""])
+    } catch (e) {
+      // keep previous
+    }
+  }, [dateStr])
+
+  useEffect(() => {
+    if (!open) return
+    loadGoals()
+  }, [open, loadGoals, refreshKey])
+
+  // Load list for a goal + parent
+  const loadList = useCallback(async (goalKey: GoalKey, parentId: string | null) => {
+    const k = keyFor(goalKey, parentId)
+    setLoading(prev => ({ ...prev, [k]: true }))
+    try {
+      const qs = new URLSearchParams()
+      qs.set("goalId", goalIdFor(goalKey))
+      if (parentId) qs.set("parentId", parentId)
+      qs.set("scopeType", "task")
+      const res = await fetch(`/api/local/breakdown?${qs.toString()}`)
+      if (!res.ok) throw new Error("load_list_failed")
+      const data = await res.json()
+      const rows: ItemRow[] = (data?.items || []).map((r: any, i: number) => ({ id: r.id, title: r.title || "", order_index: r.order_index ?? i }))
+      setTree(prev => ({ ...prev, [k]: rows }))
+    } catch (e) {
+      // keep previous
+    } finally {
+      setLoading(prev => ({ ...prev, [k]: false }))
+    }
+  }, [goalIdFor, keyFor])
+
+  // Save children for a parent list
+  const saveChildren = useCallback(async (goalKey: GoalKey, parentId: string | null, items: Array<{ id?: string; title: string; order_index?: number }>) => {
+    const body = { goalId: goalIdFor(goalKey), parentId: parentId ?? undefined, scopeType: 'task' as const, items }
+    const res = await fetch('/api/local/breakdown', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    if (!res.ok) throw new Error('save_failed')
+  }, [goalIdFor])
+
+  const updateTitle = useCallback(async (id: string, title: string) => {
+    const res = await fetch('/api/local/breakdown', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: [{ id, title }] }) })
+    if (!res.ok) throw new Error('rename_failed')
+  }, [])
+
+  const deleteItem = useCallback(async (id: string) => {
+    const res = await fetch('/api/local/breakdown', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [id] }) })
+    if (!res.ok) throw new Error('delete_failed')
+  }, [])
+
+  // Load root lists when panel opens
+  useEffect(() => {
+    if (!open) return
+    ;(['goal1','goal2','goal3'] as GoalKey[]).forEach((gk) => {
+      loadList(gk, null)
+    })
+  }, [open, loadList, refreshKey])
+
+  // Helpers
+  const labelForIndex = (i: number) => goals[i] || `Goal ${i + 1}`
+  const goalKeyForIndex = (i: number) => (i === 0 ? 'goal1' : i === 1 ? 'goal2' : 'goal3') as GoalKey
+
+  const aggregateForKey = (goalKey: GoalKey) => {
+    const items = tree[keyFor(goalKey, null)] || []
+    if (items.length === 0) return { all: false, none: true, some: false }
+    const cnt = items.reduce((acc, it) => acc + (isChecked(it.id) ? 1 : 0), 0)
+    const all = cnt === items.length
+    const none = cnt === 0
+    const some = !all && !none
+    return { all, none, some }
+  }
+
+  const toggleGoal = async (goalKey: GoalKey, value: boolean) => {
+    const items = tree[keyFor(goalKey, null)] || []
+    const next: Record<string, boolean> = {}
+    for (const it of items) next[it.id] = value
+    setDoneMap(prev => ({ ...prev, ...next }))
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="h-full bg-zinc-950 text-zinc-100 border-l border-zinc-800 p-0 sm:max-w-[500px]">
+        <div className="h-full flex flex-col">
+          <div className="p-3 border-b border-zinc-800 bg-zinc-950/80">
+            <SheetHeader>
+              <SheetTitle className="text-zinc-100">Todos</SheetTitle>
+            </SheetHeader>
+            <div className="text-xs text-zinc-400 mt-1">Quick checklist for your daily goals. Reserved space above for notes/AI.</div>
+          </div>
+
+          {/* Reserved notes/AI area */}
+          <div className="px-3 py-2 border-b border-zinc-900/60">
+            <div className="h-16 rounded-md bg-zinc-900/40 border border-zinc-800 flex items-center justify-center text-xs text-zinc-500">
+              Notes / AI chat coming soon
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-auto p-3 space-y-3">
+            {([0,1,2] as const).map((index) => {
+              const goalKey = goalKeyForIndex(index)
+              const agg = aggregateForKey(goalKey)
+              const goalChecked: boolean | 'indeterminate' = agg.some ? 'indeterminate' : agg.all
+
+              return (
+                <div key={index} className="rounded-lg border border-zinc-800 bg-zinc-950/60">
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Checkbox
+                        checked={goalChecked as any}
+                        onCheckedChange={(v) => toggleGoal(goalKey, Boolean(v))}
+                        className="data-[state=indeterminate]:bg-zinc-700"
+                      />
+                      <div className="font-medium text-zinc-100 truncate" title={labelForIndex(index)}>{labelForIndex(index)}</div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button size="icon" variant="ghost" className="text-zinc-400 hover:text-zinc-200" onClick={() => setRefreshKey(k => k + 1)} title="Refresh">
+                        <RefreshCw className="w-4 h-4" />
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-zinc-300 hover:text-white" onClick={() => loadList(goalKey, null)}>
+                        <ChevronRight className="w-4 h-4 mr-1" /> Reload
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="px-3 py-2">
+                    <List
+                      goalKey={goalKey}
+                      parentId={null}
+                      keyFor={keyFor}
+                      tree={tree}
+                      loading={loading}
+                      expanded={expanded}
+                      setExpanded={setExpanded}
+                      loadList={loadList}
+                      saveChildren={saveChildren}
+                      updateTitle={updateTitle}
+                      deleteItem={deleteItem}
+                      isChecked={isChecked}
+                      setChecked={setChecked}
+                    />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+function List({
+  goalKey,
+  parentId,
+  keyFor,
+  tree,
+  loading,
+  expanded,
+  setExpanded,
+  loadList,
+  saveChildren,
+  updateTitle,
+  deleteItem,
+  isChecked,
+  setChecked,
+}: {
+  goalKey: GoalKey
+  parentId: string | null
+  keyFor: (goalKey: GoalKey, parentId: string | null) => string
+  tree: Record<string, ItemRow[]>
+  loading: Record<string, boolean>
+  expanded: Record<string, boolean>
+  setExpanded: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
+  loadList: (goalKey: GoalKey, parentId: string | null) => Promise<void>
+  saveChildren: (goalKey: GoalKey, parentId: string | null, items: Array<{ id?: string; title: string; order_index?: number }>) => Promise<void>
+  updateTitle: (id: string, title: string) => Promise<void>
+  deleteItem: (id: string) => Promise<void>
+  isChecked: (id: string) => boolean
+  setChecked: (id: string, v: boolean) => void
+}) {
+  const listKey = keyFor(goalKey, parentId)
+  const items = tree[listKey]
+  const isLoading = !!loading[listKey]
+
+  useEffect(() => {
+    if (!items && !isLoading) loadList(goalKey, parentId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listKey])
+
+  const onAdd = async () => {
+    const curr = items || []
+    try {
+      await saveChildren(goalKey, parentId, [...curr, { title: parentId ? "New subtask" : "New task", order_index: curr.length }])
+    } finally {
+      loadList(goalKey, parentId)
+    }
+  }
+
+  const onDeleteHere = async (id: string) => {
+    try { await deleteItem(id) } finally { loadList(goalKey, parentId) }
+  }
+
+  return (
+    <div className={parentId ? "ml-4 pl-3 border-l border-zinc-800 space-y-1" : "space-y-1"}>
+      <div className="flex items-center justify-between py-1">
+        <div className="text-xs text-zinc-400">{parentId ? "Subtasks" : "Tasks"}</div>
+        <Button size="sm" variant="ghost" onClick={onAdd} className="text-zinc-300 hover:text-white">
+          <Plus className="w-4 h-4 mr-1" /> Add {parentId ? "subtask" : "task"}
+        </Button>
+      </div>
+      {isLoading && <div className="text-xs text-zinc-400 py-2">Loading…</div>}
+      {!isLoading && (!items || items.length === 0) && (
+        <div className="text-xs text-zinc-500 italic py-2">No items yet.</div>
+      )}
+      {!isLoading && (items || []).map((it) => (
+        <TreeNode
+          key={it.id}
+          item={it}
+          expanded={!!expanded[it.id]}
+          onExpand={(id) => {
+            setExpanded(e => ({ ...e, [id]: !e[id] }))
+            const willOpen = !expanded[it.id]
+            if (willOpen) loadList(goalKey, it.id)
+          }}
+          onRename={updateTitle}
+          onDelete={onDeleteHere}
+          isChecked={isChecked}
+          setChecked={setChecked}
+        >
+          {expanded[it.id] && (
+            <List
+              goalKey={goalKey}
+              parentId={it.id}
+              keyFor={keyFor}
+              tree={tree}
+              loading={loading}
+              expanded={expanded}
+              setExpanded={setExpanded}
+              loadList={loadList}
+              saveChildren={saveChildren}
+              updateTitle={updateTitle}
+              deleteItem={deleteItem}
+              isChecked={isChecked}
+              setChecked={setChecked}
+            />
+          )}
+        </TreeNode>
+      ))}
+    </div>
+  )
+}
+
+function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, setChecked, children }: {
+  item: ItemRow
+  expanded: boolean
+  onExpand: (id: string) => void
+  onRename: (id: string, title: string) => Promise<void>
+  onDelete: (id: string) => Promise<void>
+  isChecked: (id: string) => boolean
+  setChecked: (id: string, v: boolean) => void
+  children?: React.ReactNode
+}) {
+  const [title, setTitle] = useState(item.title)
+  const [inputSaving, setInputSaving] = useState(false)
+
+  useEffect(() => setTitle(item.title), [item.title])
+
+  const commit = async () => {
+    const next = title.trim()
+    if (next === item.title.trim()) return
+    try {
+      setInputSaving(true)
+      await onRename(item.id, next)
+    } finally {
+      setInputSaving(false)
+    }
+  }
+
+  const checked = isChecked(item.id)
+
+  return (
+    <div className="group rounded-md hover:bg-zinc-900/50 px-2 py-1">
+      <div className="flex items-start gap-2">
+        <button onClick={() => onExpand(item.id)} className="mt-1 text-zinc-400 hover:text-zinc-200">
+          {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+        </button>
+        <Checkbox
+          checked={checked as any}
+          onCheckedChange={(v) => setChecked(item.id, Boolean(v))}
+          className="mt-1"
+        />
+        <div className="flex-1 min-w-0">
+          <Input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+            className="h-8 bg-zinc-900/60 border-zinc-800 text-zinc-100 placeholder:text-zinc-500"
+            placeholder="Untitled"
+          />
+        </div>
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <Button size="icon" variant="ghost" className="text-zinc-400 hover:text-red-400" onClick={() => onDelete(item.id)} title="Delete">
+            <Trash2 className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
+      {expanded && (
+        <div className="ml-6 mt-1">
+          {children}
+        </div>
+      )}
+      {inputSaving && <div className="pl-8 text-[10px] text-zinc-500">Saving…</div>}
+    </div>
+  )
+}
