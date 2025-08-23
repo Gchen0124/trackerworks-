@@ -2167,34 +2167,6 @@ export default function TimeTracker() {
         {/* Daily Goals (Glass/Silver) */}
         <DailyGoals />
 
-        {/* Block Duration Selector */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Settings className="h-5 w-5" />
-                <span>Time Block Settings</span>
-              </div>
-
-              <div className="flex items-center gap-4 text-sm text-gray-600">
-                <span>{totalBlocks} blocks total</span>
-                <span>{blocksPerHour} blocks/hour</span>
-              </div>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-gray-500" />
-                <span className="text-sm font-medium">Block Duration:</span>
-              </div>
-              <div className="relative">
-                <div className="text-sm text-gray-600">{blocksPerHour} blocks/hour</div>
-              </div>
-
-            </div>
-          </CardContent>
-        </Card>
 
         {/* Change Notification */}
         {showChangeNotification && (
@@ -2239,53 +2211,6 @@ export default function TimeTracker() {
           </Card>
         )}
 
-        {/* Timer Controls */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>Current Session</span>
-              <div className="text-2xl font-mono">{formatTime(timerSeconds)}</div>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                {currentBlock?.task ? (
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-lg">{currentBlock.task.title}</span>
-                    <div className="text-xl font-mono font-bold text-blue-600">
-                      {getRemainingTime(currentBlock)}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between">
-                    <span className="text-gray-500 text-lg">No task assigned</span>
-                    <div className="text-xl font-mono font-bold text-blue-600">
-                      {currentBlock ? getRemainingTime(currentBlock) : "0:00"}
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="flex gap-2">
-                {!isTimerRunning ? (
-                  <Button onClick={startTimer} className="flex items-center gap-2">
-                    <Play className="h-4 w-4" />
-                    Start Focus
-                  </Button>
-                ) : (
-                  <Button onClick={pauseTimer} variant="outline" className="flex items-center gap-2 bg-transparent">
-                    <Pause className="h-4 w-4" />
-                    Pause
-                  </Button>
-                )}
-                <Button onClick={stopTimer} variant="destructive" className="flex items-center gap-2">
-                  <Square className="h-4 w-4" />
-                  Complete
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
 
         {/* Time Grid */}
         <Card>
@@ -2569,6 +2494,84 @@ export default function TimeTracker() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Block Duration Selector (moved below Time Grid) */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Settings className="h-5 w-5" />
+                <span>Time Block Settings</span>
+              </div>
+
+              <div className="flex items-center gap-4 text-sm text-gray-600">
+                <span>{totalBlocks} blocks total</span>
+                <span>{blocksPerHour} blocks/hour</span>
+              </div>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-gray-500" />
+                <span className="text-sm font-medium">Block Duration:</span>
+              </div>
+              <div className="relative">
+                <div className="text-sm text-gray-600">{blocksPerHour} blocks/hour</div>
+              </div>
+
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Timer Controls (moved below Time Grid) */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span>Current Session</span>
+              <div className="text-2xl font-mono">{formatTime(timerSeconds)}</div>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div className="flex-1">
+                {currentBlock?.task ? (
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-lg">{currentBlock.task.title}</span>
+                    <div className="text-xl font-mono font-bold text-blue-600">
+                      {getRemainingTime(currentBlock)}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-500 text-lg">No task assigned</span>
+                    <div className="text-xl font-mono font-bold text-blue-600">
+                      {currentBlock ? getRemainingTime(currentBlock) : "0:00"}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {!isTimerRunning ? (
+                  <Button onClick={startTimer} className="flex items-center gap-2">
+                    <Play className="h-4 w-4" />
+                    Start Focus
+                  </Button>
+                ) : (
+                  <Button onClick={pauseTimer} variant="outline" className="flex items-center gap-2 bg-transparent">
+                    <Pause className="h-4 w-4" />
+                    Pause
+                  </Button>
+                )}
+                <Button onClick={stopTimer} variant="destructive" className="flex items-center gap-2">
+                  <Square className="h-4 w-4" />
+                  Complete
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
 
         {/* Task Selector Modal */}
         {showTaskSelector && selectedBlock && (
