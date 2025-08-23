@@ -2921,6 +2921,15 @@ export default function TimeTracker() {
             })()}
           />
         )}
+
+        {/* Active Window Setup Modal */}
+        <ActiveWindowSetup
+          open={showActiveWindowSetup}
+          onClose={() => setShowActiveWindowSetup(false)}
+          onSave={saveActiveWindow}
+          defaultStart="08:00"
+          defaultEnd="23:00"
+        />
       </div>
 
         {/* Bottom Toolbar: Voice, Notion, Test Popup */}
