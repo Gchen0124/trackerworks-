@@ -164,3 +164,26 @@ CREATE TABLE IF NOT EXISTS daily_goal_links (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_goal_link ON daily_goal_links(date, slot);
 `)
 
+
+// Daily active window (for dark/inactive hours analytics)
+sqlite.exec(`
+CREATE TABLE IF NOT EXISTS daily_active_windows (
+  date TEXT PRIMARY KEY,
+  active_start_minute INTEGER NOT NULL,
+  active_end_minute INTEGER NOT NULL,
+  created_at INTEGER DEFAULT (strftime('%s','now')*1000),
+  updated_at INTEGER DEFAULT (strftime('%s','now')*1000)
+);
+`)
+
+
+// Daily time analytics derived from active window
+sqlite.exec(`
+CREATE TABLE IF NOT EXISTS daily_time_analytics (
+  date TEXT PRIMARY KEY,
+  active_minutes INTEGER NOT NULL,
+  inactive_minutes INTEGER NOT NULL,
+  created_at INTEGER DEFAULT (strftime('%s','now')*1000),
+  updated_at INTEGER DEFAULT (strftime('%s','now')*1000)
+);
+`)

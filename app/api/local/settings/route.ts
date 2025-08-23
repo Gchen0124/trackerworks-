@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     const next = {
       block_duration_minutes: blockDurationMinutes ?? prev?.block_duration_minutes ?? 30,
       enable_half_hour_alerts: enableHalfHourAlerts ?? prev?.enable_half_hour_alerts ?? 1,
-      time_zone: timeZone ?? prev?.time_zone || 'UTC',
+      time_zone: timeZone ?? (prev?.time_zone ?? 'UTC'),
     }
 
     sqlite.prepare(`UPDATE user_settings SET block_duration_minutes = ?, enable_half_hour_alerts = ?, time_zone = ?, updated_at = strftime('%s','now')*1000 WHERE id = 1`)

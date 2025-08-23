@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select"
-import { Play, Pause, Square, Mic, Calendar, Database, ArrowRight, Undo2, Clock, Settings, Pin, PinOff, ListChecks } from "lucide-react"
+import { Play, Pause, Square, Mic, Calendar, Database, ArrowRight, Undo2, Clock, Settings, Pin, PinOff, ListChecks, MoonStar } from "lucide-react"
 import { cn } from "@/lib/utils"
 import TaskSelector from "@/components/task-selector"
 import VoiceInterface from "@/components/voice-interface"
@@ -16,6 +16,7 @@ import QuickTaskInput from "@/components/quick-task-input"
 import ProgressCheckPopup from "@/components/progress-check-popup"
 import DailyGoals from "@/components/daily-goals"
 import NestedTodosPanel from "@/components/nested-todos-panel"
+import ActiveWindowSetup from "@/components/active-window-setup"
 
 interface TimeBlock {
   id: string
@@ -162,6 +163,10 @@ export default function TimeTracker() {
   const snapshot30Ref = useRef<TimeBlock[]>([])
   const snapshot3Ref = useRef<TimeBlock[]>([])
   const [lastAssignedGoalId, setLastAssignedGoalId] = useState<string | null>(null)
+  // Active window (for dark/inactive hours)
+  const [activeWindow, setActiveWindow] = useState<{ activeStartMinute: number | null; activeEndMinute: number | null } | null>(null)
+  const [showActiveWindowSetup, setShowActiveWindowSetup] = useState(false)
+
 
   // Multi-select and bulk move state
   const [multiSelect, setMultiSelect] = useState<{ isActive: boolean; selected: string[]; lastAnchorId: string | null }>({
@@ -687,6 +692,32 @@ export default function TimeTracker() {
       snapshot3Ref.current = timeBlocks.map(deepCopy)
     }
   }, [timeBlocks, blockDurationMinutes])
+
+  // Fetch today's active window and prompt if missing
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const res = await fetch('/api/local/active-window', { cache: 'no-store' })
+        const json = await res.json()
+        setActiveWindow({ activeStartMinute: json.activeStartMinute, activeEndMinute: json.activeEndMinute })
+        if (json.activeStartMinute == null || json.activeEndMinute == null) {
+          setShowActiveWindowSetup(true)
+        }
+      } catch (e) {
+        console.warn('Failed to load active window', e)
+      }
+    }
+    run()
+  }, [])
+
+  const saveActiveWindow = async (payload: { activeStartMinute: number | null; activeEndMinute: number | null }) => {
+    try {
+      await fetch('/api/local/active-window', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      setActiveWindow(payload)
+    } catch (e) {
+      console.warn('Failed to save active window', e)
+    }
+  }
 
   // Note: DB-backed seeding is disabled until the local blocks API/hook is wired.
 
@@ -1713,6 +1744,18 @@ export default function TimeTracker() {
       isCompleted: !!b.isCompleted,
     })
     if (blockDurationMinutes === 30) {
+
+    // Active window derived metrics helpers
+    const formatMinAsHHMM = (m: number) => {
+      const hh = Math.floor(m / 60).toString().padStart(2, '0')
+      const mm = (m % 60).toString().padStart(2, '0')
+      return `${hh}:${mm}`
+    }
+    const activeStartMin = activeWindow?.activeStartMinute ?? null
+    const activeEndMin = activeWindow?.activeEndMinute ?? null
+    const totalActiveMinutes = (activeStartMin != null && activeEndMin != null && activeEndMin > activeStartMin) ? (activeEndMin - activeStartMin) : null
+    const activeBlocksCount = totalActiveMinutes != null ? Math.floor(totalActiveMinutes / blockDurationMinutes) : null
+
       snapshot30Ref.current = timeBlocks.map(deepCopy)
     } else if (blockDurationMinutes === 3) {
       snapshot3Ref.current = timeBlocks.map(deepCopy)
@@ -2082,6 +2125,7 @@ export default function TimeTracker() {
                   <span className="text-blue-800 font-semibold">↔️ Simple Move Mode:</span>
                   <span className="text-blue-700">
                     Drop on any future block to move "{dragState.task?.title}" there.
+
                     If occupied, that task will be postponed.
                   </span>
                 </>
@@ -2142,6 +2186,10 @@ export default function TimeTracker() {
             <Button variant="outline" className="flex items-center gap-2" onClick={exportTodayCsv}>
               Export CSV
             </Button>
+            <Button variant="outline" size="icon" onClick={() => setShowActiveWindowSetup(true)} title="Set wake/start and sleep times">
+              <MoonStar className="h-4 w-4" />
+            </Button>
+
             {/* Quick Block Duration Dropdown (moved next to header buttons) */}
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-gray-500" />
@@ -2343,6 +2391,8 @@ export default function TimeTracker() {
                             : undefined,
                       }}
                       title={`${block.startTime} - ${block.endTime}${block.task ? `: ${block.task.title}` : ""} (${blockStatus})${block.isPinned ? " [PINNED]" : ""}${isInPlanningSelection ? " - SELECTED FOR PLANNING" : ""}`}
+
+
                     >
                       {/* Pin toggle */}
                       <button
@@ -2415,8 +2465,28 @@ export default function TimeTracker() {
                           </span>
                         </div>
                       </div>
+                      {/* Dark hours overlay (always rendered, not only when there is a task) */}
+                      {(() => {
+                        if (!activeWindow || activeWindow.activeStartMinute == null || activeWindow.activeEndMinute == null) return null
+                        const [sh, sm] = block.startTime.split(":").map(Number)
+                        const [eh, em] = block.endTime.split(":").map(Number)
+                        const startIdx = sh * 60 + sm
+                        const endIdx = eh * 60 + em
+                        const aS = activeWindow.activeStartMinute
+                        const aE = activeWindow.activeEndMinute
+                        const isInactive = (endIdx <= aS) || (startIdx >= aE)
+                        if (!isInactive) return null
+                        return (
+                          <div className="absolute inset-0 rounded-lg bg-slate-900/60 backdrop-blur-[1px] flex items-center justify-center pointer-events-none">
+                            <MoonStar className="w-4 h-4 text-slate-200 opacity-80" />
+                          </div>
+                        )
+                      })()}
+
+
                       {block.task && (
                         <>
+
                           <div
                             className={cn(
                               "absolute left-2 right-3",
@@ -2513,6 +2583,16 @@ export default function TimeTracker() {
           <CardContent>
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
+        {/* Active Window Setup Modal */}
+        <ActiveWindowSetup
+          open={showActiveWindowSetup}
+          onClose={() => setShowActiveWindowSetup(false)}
+          onSave={async (payload) => {
+            await saveActiveWindow(payload)
+            setShowActiveWindowSetup(false)
+          }}
+        />
+
                 <Clock className="h-4 w-4 text-gray-500" />
                 <span className="text-sm font-medium">Block Duration:</span>
               </div>
@@ -2536,6 +2616,7 @@ export default function TimeTracker() {
             <div className="flex items-center justify-between">
               <div className="flex-1">
                 {currentBlock?.task ? (
+
                   <div className="flex items-center justify-between">
                     <span className="font-medium text-lg">{currentBlock.task.title}</span>
                     <div className="text-xl font-mono font-bold text-blue-600">
