@@ -1,6 +1,26 @@
 import { NextRequest } from "next/server"
 import { sqlite } from "@/lib/db"
 
+function ensureTables() {
+  try {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS daily_active_windows (
+        date TEXT PRIMARY KEY,
+        active_start_minute INTEGER,
+        active_end_minute INTEGER,
+        updated_at INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS daily_time_analytics (
+        date TEXT PRIMARY KEY,
+        active_minutes INTEGER,
+        inactive_minutes INTEGER,
+        updated_at INTEGER
+      );
+    `)
+  } catch {}
+}
+
+
 function todayISO(date = new Date()) {
   const y = date.getFullYear()
   const m = String(date.getMonth() + 1).padStart(2, '0')
@@ -10,6 +30,7 @@ function todayISO(date = new Date()) {
 
 export async function GET() {
   try {
+    ensureTables()
     const date = todayISO()
     const row = sqlite.prepare(`SELECT * FROM daily_active_windows WHERE date = ?`).get(date) as any
     if (!row) {
@@ -30,6 +51,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    ensureTables()
     const body = await req.json().catch(() => ({}))
     const start = Number(body?.activeStartMinute)
     const end = Number(body?.activeEndMinute)
@@ -49,6 +71,7 @@ export async function POST(req: NextRequest) {
 // Upsert analytics on active-window updates
 export async function PUT(req: NextRequest) {
   try {
+    ensureTables()
     const body = await req.json().catch(() => ({}))
     const start = Number(body?.activeStartMinute)
     const end = Number(body?.activeEndMinute)
