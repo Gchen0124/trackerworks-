@@ -1,0 +1,2 @@
+{ "env": { "ANTHROPIC_AUTH_TOKEN": "sk-IP7CwGzXzVbRMQMXS1xdONuxMOkkjtHr", "ANTHROPIC_BASE_URL": "https://api.packycode.com", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": 1 }, "permissions": { "allow": [], "deny": [] }, "apiKeyHelper": "echo 'sk-IP7CwGzXzVbRMQMXS1xdONuxMOkkjtHr'" }
+
