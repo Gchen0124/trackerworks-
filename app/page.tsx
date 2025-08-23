@@ -1756,6 +1756,72 @@ export default function TimeTracker() {
     const totalActiveMinutes = (activeStartMin != null && activeEndMin != null && activeEndMin > activeStartMin) ? (activeEndMin - activeStartMin) : null
     const activeBlocksCount = totalActiveMinutes != null ? Math.floor(totalActiveMinutes / blockDurationMinutes) : null
 
+    // --- Focus Overview derived metrics ---
+    const isWindowValid = activeStartMin != null && activeEndMin != null && (activeEndMin as number) > (activeStartMin as number)
+    const nowIdx = currentTime ? (currentTime.getHours() * 60 + currentTime.getMinutes()) : null
+    const blocksToTime = (n: number) => {
+      const mins = n * blockDurationMinutes
+      const hh = Math.floor(mins / 60)
+      const mm = mins % 60
+      return `${hh}h ${mm}m`
+    }
+    const parseIdx = (hhmm: string) => {
+      const [h, m] = hhmm.split(":").map(Number)
+      return h * 60 + m
+    }
+    const inactiveCount = isWindowValid ? timeBlocks.reduce((acc, b) => {
+      const s = parseIdx(b.startTime), e = parseIdx(b.endTime)
+      return acc + ((e <= (activeStartMin as number) || s >= (activeEndMin as number)) ? 1 : 0)
+    }, 0) : 0
+    const availableCount = Math.max(0, totalBlocks - inactiveCount)
+    const activePassedBlocks = (isWindowValid && nowIdx != null) ? timeBlocks.reduce((acc, b) => {
+      const s = parseIdx(b.startTime), e = parseIdx(b.endTime)
+      const inside = !(e <= (activeStartMin as number) || s >= (activeEndMin as number))
+      return acc + (inside && e <= nowIdx ? 1 : 0)
+    }, 0) : 0
+    const activeLeftBlocks = (isWindowValid && nowIdx != null) ? timeBlocks.reduce((acc, b) => {
+      const s = parseIdx(b.startTime), e = parseIdx(b.endTime)
+      const inside = !(e <= (activeStartMin as number) || s >= (activeEndMin as number))
+      return acc + (inside && s >= nowIdx ? 1 : 0)
+    }, 0) : 0
+    // Goals via DailyGoals snapshot only
+    const goalsForToday = [
+      { id: 'goal_1', label: dailyGoals[0] || 'Goal 1' },
+      { id: 'goal_2', label: dailyGoals[1] || 'Goal 2' },
+      { id: 'goal_3', label: dailyGoals[2] || 'Goal 3' },
+    ]
+    const goalsAchieved = goalsForToday.filter(g => timeBlocks.some(b => b.goal?.id === g.id && b.isCompleted))
+    const goalsUnfinished = (isWindowValid && nowIdx != null)
+      ? goalsForToday.filter(g => timeBlocks.some(b => {
+          const s = parseIdx(b.startTime), e = parseIdx(b.endTime)
+          const inside = !(e <= (activeStartMin as number) || s >= (activeEndMin as number))
+          return b.goal?.id === g.id && inside && s >= nowIdx && !b.isCompleted
+        }))
+      : []
+    // Tasks done/undone: unique titles with counts
+    const isNoise = (t?: string) => !!t && (t.includes('Paused') || t.includes('Disrupted') || t.includes('Interrupted'))
+    const tasksDoneMap = new Map<string, number>()
+    const tasksUndoneMap = new Map<string, number>()
+    timeBlocks.forEach(b => {
+      const title = b.task?.title || undefined
+      if (!title || isNoise(title)) return
+      if (b.isCompleted) {
+        tasksDoneMap.set(title, (tasksDoneMap.get(title) || 0) + 1)
+      } else if (isWindowValid && nowIdx != null) {
+        const s = parseIdx(b.startTime), e = parseIdx(b.endTime)
+        const inside = !(e <= (activeStartMin as number) || s >= (activeEndMin as number))
+        if (inside && s >= nowIdx) tasksUndoneMap.set(title, (tasksUndoneMap.get(title) || 0) + 1)
+      }
+    })
+    const toList = (m: Map<string, number>, cap = 5) => {
+      const arr = Array.from(m.entries()).sort((a,b) => b[1]-a[1])
+      const more = Math.max(0, arr.length - cap)
+      return { top: arr.slice(0, cap), more }
+    }
+    const tasksDone = toList(tasksDoneMap)
+    const tasksUndone = toList(tasksUndoneMap)
+
+
       snapshot30Ref.current = timeBlocks.map(deepCopy)
     } else if (blockDurationMinutes === 3) {
       snapshot3Ref.current = timeBlocks.map(deepCopy)
@@ -1781,6 +1847,72 @@ export default function TimeTracker() {
 
   const totalBlocks = timeBlocks.length
   const blocksPerHour = 60 / blockDurationMinutes
+
+
+  // Focus Overview metrics (component scope)
+  const activeStartMin = activeWindow?.activeStartMinute ?? null
+  const activeEndMin = activeWindow?.activeEndMinute ?? null
+  const isWindowValid = activeStartMin != null && activeEndMin != null && activeEndMin > activeStartMin
+  const nowIdx = currentTime ? (currentTime.getHours() * 60 + currentTime.getMinutes()) : null
+  const blocksToTime = (n: number) => {
+    const mins = n * blockDurationMinutes
+    const hh = Math.floor(mins / 60)
+    const mm = mins % 60
+    return `${hh}h ${mm}m`
+  }
+  const parseIdx = (hhmm: string) => {
+    const [h, m] = hhmm.split(":").map(Number)
+    return h * 60 + m
+  }
+  const inactiveCount = isWindowValid ? timeBlocks.reduce((acc, b) => {
+    const s = parseIdx(b.startTime), e = parseIdx(b.endTime)
+    return acc + ((e <= (activeStartMin as number) || s >= (activeEndMin as number)) ? 1 : 0)
+  }, 0) : 0
+  const availableCount = Math.max(0, totalBlocks - inactiveCount)
+  const activePassedBlocks = (isWindowValid && nowIdx != null) ? timeBlocks.reduce((acc, b) => {
+    const s = parseIdx(b.startTime), e = parseIdx(b.endTime)
+    const inside = !(e <= (activeStartMin as number) || s >= (activeEndMin as number))
+    return acc + (inside && e <= nowIdx ? 1 : 0)
+  }, 0) : 0
+  const activeLeftBlocks = (isWindowValid && nowIdx != null) ? timeBlocks.reduce((acc, b) => {
+    const s = parseIdx(b.startTime), e = parseIdx(b.endTime)
+    const inside = !(e <= (activeStartMin as number) || s >= (activeEndMin as number))
+    return acc + (inside && s >= nowIdx ? 1 : 0)
+  }, 0) : 0
+  const goalsForToday = [
+    { id: 'goal_1', label: dailyGoals[0] || 'Goal 1' },
+    { id: 'goal_2', label: dailyGoals[1] || 'Goal 2' },
+    { id: 'goal_3', label: dailyGoals[2] || 'Goal 3' },
+  ]
+  const goalsAchieved = goalsForToday.filter(g => timeBlocks.some(b => b.goal?.id === g.id && b.isCompleted))
+  const goalsUnfinished = (isWindowValid && nowIdx != null)
+    ? goalsForToday.filter(g => timeBlocks.some(b => {
+        const s = parseIdx(b.startTime), e = parseIdx(b.endTime)
+        const inside = !(e <= (activeStartMin as number) || s >= (activeEndMin as number))
+        return b.goal?.id === g.id && inside && s >= nowIdx && !b.isCompleted
+      }))
+    : []
+  const isNoise = (t?: string) => !!t && (t.includes('Paused') || t.includes('Disrupted') || t.includes('Interrupted'))
+  const tasksDoneMap = new Map<string, number>()
+  const tasksUndoneMap = new Map<string, number>()
+  timeBlocks.forEach(b => {
+    const title = b.task?.title || undefined
+    if (!title || isNoise(title)) return
+    if (b.isCompleted) {
+      tasksDoneMap.set(title, (tasksDoneMap.get(title) || 0) + 1)
+    } else if (isWindowValid && nowIdx != null) {
+      const s = parseIdx(b.startTime), e = parseIdx(b.endTime)
+      const inside = !(e <= (activeStartMin as number) || s >= (activeEndMin as number))
+      if (inside && s >= nowIdx) tasksUndoneMap.set(title, (tasksUndoneMap.get(title) || 0) + 1)
+    }
+  })
+  const toList = (m: Map<string, number>, cap = 5) => {
+    const arr = Array.from(m.entries()).sort((a,b) => b[1]-a[1])
+    const more = Math.max(0, arr.length - cap)
+    return { top: arr.slice(0, cap), more }
+  }
+  const tasksDone = toList(tasksDoneMap)
+  const tasksUndone = toList(tasksUndoneMap)
 
   // Voice alert function
   const speakTimeAlert = (message: string) => {
@@ -2513,6 +2645,7 @@ export default function TimeTracker() {
                               return (
                                 <p
                                   className={cn(
+
                                     `${sizeClass} font-medium`,
                                     (isCurrentBlock || isInPlanningSelection || (blockStatus === 'future' && !!block.task)) ? "text-white" : "text-gray-900",
                                     // Allow multi-line wrap and tighter leading
@@ -2571,7 +2704,7 @@ export default function TimeTracker() {
             <CardTitle className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Settings className="h-5 w-5" />
-                <span>Time Block Settings</span>
+                <span>Focus Overview</span>
               </div>
 
               <div className="flex items-center gap-4 text-sm text-gray-600">
@@ -2581,25 +2714,69 @@ export default function TimeTracker() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-        {/* Active Window Setup Modal */}
-        <ActiveWindowSetup
-          open={showActiveWindowSetup}
-          onClose={() => setShowActiveWindowSetup(false)}
-          onSave={async (payload) => {
-            await saveActiveWindow(payload)
-            setShowActiveWindowSetup(false)
-          }}
-        />
-
-                <Clock className="h-4 w-4 text-gray-500" />
-                <span className="text-sm font-medium">Block Duration:</span>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-gray-700">
+              <div className="space-y-2">
+                <div className="font-medium text-gray-900">Today capacity</div>
+                <div>
+                  <span className="font-semibold">{availableCount}</span> blocks
+                  <span className="text-gray-500"> ({blocksToTime(availableCount)})</span>
+                </div>
+                {!isWindowValid && (
+                  <div className="text-xs text-orange-600">Set your active window to compute available time.</div>
+                )}
               </div>
-              <div className="relative">
-                <div className="text-sm text-gray-600">{blocksPerHour} blocks/hour</div>
+              <div className="space-y-2">
+                <div className="font-medium text-gray-900">Today so far</div>
+                <div>
+                  <span className="font-semibold">{activePassedBlocks}</span> blocks
+                  <span className="text-gray-500"> ({blocksToTime(activePassedBlocks)})</span>
+                </div>
+                <div className="mt-1 text-gray-600">Goals achieved:</div>
+                <div className="flex flex-wrap gap-1">
+                  {goalsAchieved.length === 0 ? (
+                    <span className="text-gray-400">None yet</span>
+                  ) : goalsAchieved.map(g => (
+                    <span key={g.id} className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-xs">{g.label}</span>
+                  ))}
+                </div>
+                <div className="mt-1 text-gray-600">Tasks done:</div>
+                <div className="flex flex-wrap gap-1">
+                  {tasksDone.top.length === 0 ? (
+                    <span className="text-gray-400">None yet</span>
+                  ) : tasksDone.top.map(([t, c]) => (
+                    <span key={t} className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-xs">{t} ×{c}</span>
+                  ))}
+                  {tasksDone.more > 0 && (
+                    <span className="text-gray-400 text-xs">+{tasksDone.more} more</span>
+                  )}
+                </div>
               </div>
-
+              <div className="space-y-2">
+                <div className="font-medium text-gray-900">Remaining today</div>
+                <div>
+                  <span className="font-semibold">{activeLeftBlocks}</span> blocks
+                  <span className="text-gray-500"> ({blocksToTime(activeLeftBlocks)})</span>
+                </div>
+                <div className="mt-1 text-gray-600">Goals unfinished:</div>
+                <div className="flex flex-wrap gap-1">
+                  {goalsUnfinished.length === 0 ? (
+                    <span className="text-gray-400">None</span>
+                  ) : goalsUnfinished.map(g => (
+                    <span key={g.id} className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-xs">{g.label}</span>
+                  ))}
+                </div>
+                <div className="mt-1 text-gray-600">Tasks undone:</div>
+                <div className="flex flex-wrap gap-1">
+                  {tasksUndone.top.length === 0 ? (
+                    <span className="text-gray-400">None</span>
+                  ) : tasksUndone.top.map(([t, c]) => (
+                    <span key={t} className="px-2 py-0.5 rounded-full bg-gray-200 text-gray-700 text-xs">{t} ×{c}</span>
+                  ))}
+                  {tasksUndone.more > 0 && (
+                    <span className="text-gray-400 text-xs">+{tasksUndone.more} more</span>
+                  )}
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
