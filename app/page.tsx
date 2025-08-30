@@ -127,17 +127,32 @@ export default function TimeTracker() {
       await playJoyfulChime()
       // Respect popup gating to simulate real behavior
       if (showProgressCheck) return
+      
+      // Calculate progress information using component-scoped variables
+      const passedBlocks = activePassedBlocks || 0
+      const leftBlocks = activeLeftBlocks || 0
+      const passedTime = blocksToTime(passedBlocks)
+      const leftTime = blocksToTime(leftBlocks)
+      
       if (m < 29) {
         const target = `${hh.toString().padStart(2, '0')}:30`
         const text = `cheer up, it's almost ${target}`
-        maybeShowSystemNotification(text)
-        await playMaleTts(text)
+        const progressText = passedBlocks > 0 || leftBlocks > 0 
+          ? `. ${passedBlocks} blocks (${passedTime}) passed, ${leftBlocks} blocks (${leftTime}) left for today`
+          : ''
+        const fullText = text + progressText
+        maybeShowSystemNotification(fullText)
+        await playMaleTts(fullText)
       } else {
         const nextHour = (hh + 1) % 24
         const target = `${nextHour.toString().padStart(2, '0')}:00`
         const text = `cheer up, it's almost ${target}`
-        maybeShowSystemNotification(text)
-        await playMaleTts(text)
+        const progressText = passedBlocks > 0 || leftBlocks > 0 
+          ? `. ${passedBlocks} blocks (${passedTime}) passed, ${leftBlocks} blocks (${leftTime}) left for today`
+          : ''
+        const fullText = text + progressText
+        maybeShowSystemNotification(fullText)
+        await playMaleTts(fullText)
       }
     } catch {}
   }
@@ -662,15 +677,28 @@ export default function TimeTracker() {
       await playJoyfulChime()
       // If popup opened during chime, skip announcement
       if (showProgressCheck) return
+      
+      // Calculate progress information using component-scoped variables
+      const passedBlocks = activePassedBlocks || 0
+      const leftBlocks = activeLeftBlocks || 0
+      const passedTime = blocksToTime(passedBlocks)
+      const leftTime = blocksToTime(leftBlocks)
+      
       if (m === 29) {
         const target = `${hh.toString().padStart(2, '0')}:30`
-        const text = `cheer up, it's almost ${target}`
+        const progressText = passedBlocks > 0 || leftBlocks > 0 
+          ? `. ${passedBlocks} blocks (${passedTime}) passed, ${leftBlocks} blocks (${leftTime}) left for today`
+          : ''
+        const text = `cheer up, it's almost ${target}${progressText}`
         maybeShowSystemNotification(text)
         await playMaleTts(text)
       } else {
         const nextHour = (hh + 1) % 24
         const target = `${nextHour.toString().padStart(2, '0')}:00`
-        const text = `cheer up, it's almost ${target}`
+        const progressText = passedBlocks > 0 || leftBlocks > 0 
+          ? `. ${passedBlocks} blocks (${passedTime}) passed, ${leftBlocks} blocks (${leftTime}) left for today`
+          : ''
+        const text = `cheer up, it's almost ${target}${progressText}`
         maybeShowSystemNotification(text)
         await playMaleTts(text)
       }
