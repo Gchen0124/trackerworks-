@@ -135,20 +135,24 @@ export default function TimeTracker() {
       const leftTime = blocksToTime(leftBlocks)
       
       if (m < 29) {
-        const target = `${hh.toString().padStart(2, '0')}:30`
+        const targetHour = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh
+        const targetPeriod = hh < 12 ? 'AM' : 'PM'
+        const target = `${targetHour}:30 ${targetPeriod}`
         const text = `cheer up, it's almost ${target}`
         const progressText = passedBlocks > 0 || leftBlocks > 0 
-          ? `. ${passedBlocks} blocks (${passedTime}) passed, ${leftBlocks} blocks (${leftTime}) left for today`
+          ? `. ${passedBlocks} blocks, ${passedTime} passed, ${leftBlocks} blocks, ${leftTime} left for today`
           : ''
         const fullText = text + progressText
         maybeShowSystemNotification(fullText)
         await playMaleTts(fullText)
       } else {
         const nextHour = (hh + 1) % 24
-        const target = `${nextHour.toString().padStart(2, '0')}:00`
+        const targetHour = nextHour === 0 ? 12 : nextHour > 12 ? nextHour - 12 : nextHour
+        const targetPeriod = nextHour < 12 ? 'AM' : 'PM'
+        const target = `${targetHour} ${targetPeriod}`
         const text = `cheer up, it's almost ${target}`
         const progressText = passedBlocks > 0 || leftBlocks > 0 
-          ? `. ${passedBlocks} blocks (${passedTime}) passed, ${leftBlocks} blocks (${leftTime}) left for today`
+          ? `. ${passedBlocks} blocks, ${passedTime} passed, ${leftBlocks} blocks, ${leftTime} left for today`
           : ''
         const fullText = text + progressText
         maybeShowSystemNotification(fullText)
@@ -685,18 +689,22 @@ export default function TimeTracker() {
       const leftTime = blocksToTime(leftBlocks)
       
       if (m === 29) {
-        const target = `${hh.toString().padStart(2, '0')}:30`
+        const targetHour = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh
+        const targetPeriod = hh < 12 ? 'AM' : 'PM'
+        const target = `${targetHour}:30 ${targetPeriod}`
         const progressText = passedBlocks > 0 || leftBlocks > 0 
-          ? `. ${passedBlocks} blocks (${passedTime}) passed, ${leftBlocks} blocks (${leftTime}) left for today`
+          ? `. ${passedBlocks} blocks, ${passedTime} passed, ${leftBlocks} blocks, ${leftTime} left for today`
           : ''
         const text = `cheer up, it's almost ${target}${progressText}`
         maybeShowSystemNotification(text)
         await playMaleTts(text)
       } else {
         const nextHour = (hh + 1) % 24
-        const target = `${nextHour.toString().padStart(2, '0')}:00`
+        const targetHour = nextHour === 0 ? 12 : nextHour > 12 ? nextHour - 12 : nextHour
+        const targetPeriod = nextHour < 12 ? 'AM' : 'PM'
+        const target = `${targetHour} ${targetPeriod}`
         const progressText = passedBlocks > 0 || leftBlocks > 0 
-          ? `. ${passedBlocks} blocks (${passedTime}) passed, ${leftBlocks} blocks (${leftTime}) left for today`
+          ? `. ${passedBlocks} blocks, ${passedTime} passed, ${leftBlocks} blocks, ${leftTime} left for today`
           : ''
         const text = `cheer up, it's almost ${target}${progressText}`
         maybeShowSystemNotification(text)
