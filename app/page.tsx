@@ -411,8 +411,9 @@ export default function TimeTracker() {
         })
       }
 
-      // 2) If entering 3-min mode, restore from 3-min snapshot if present
-      if (blockDurationMinutes === 3 && snapshot3Ref.current.length) {
+      // 2) If entering 3-min mode, restore from 3-min snapshot if present 
+      // BUT only if we're not coming from 30-minute mode (prioritize 30->3 propagation)
+      if (blockDurationMinutes === 3 && snapshot3Ref.current.length && prevDurationRef.current !== 30) {
         const byStart = new Map(snapshot3Ref.current.map((b) => [b.startTime, b]))
         blocks.forEach((b, i) => {
           const snap = byStart.get(b.startTime)
@@ -470,8 +471,9 @@ export default function TimeTracker() {
           }
         }
       }
-      // 3) Fallback: if we just changed from 30-minute mode to a smaller mode and no snapshot exists, propagate tasks/goals/pins
-      if (prevDuration === 30 && blockDurationMinutes < 30 && prevBlocksRef.current.length && snapshot3Ref.current.length === 0 && blockDurationMinutes !== 1) {
+      // 3) Fallback: if we just changed from 30-minute mode to a smaller mode, propagate tasks/goals/pins
+      // This now takes priority over restoring old snapshots when coming from 30-minute mode
+      if (prevDuration === 30 && blockDurationMinutes < 30 && prevBlocksRef.current.length && blockDurationMinutes !== 1) {
         // Helper to convert HH:MM to minutes from midnight
         const toMin = (hhmm: string) => {
           const [h, m] = hhmm.split(":").map(Number)
