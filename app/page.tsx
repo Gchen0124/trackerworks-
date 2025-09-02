@@ -755,7 +755,42 @@ export default function TimeTracker() {
     }
   }
 
-  // Note: DB-backed seeding is disabled until the local blocks API/hook is wired.
+  // Save half-hour alerts setting to database
+  const toggleHalfHourAlerts = async () => {
+    const newValue = !enableHalfHourAlerts
+    setEnableHalfHourAlerts(newValue)
+    try {
+      await fetch('/api/local/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enableHalfHourAlerts: newValue })
+      })
+    } catch (error) {
+      console.warn('Failed to save half-hour alerts setting:', error)
+    }
+  }
+
+  // Load settings from API on app startup
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const response = await fetch('/api/local/settings')
+        if (response.ok) {
+          const settings = await response.json()
+          setBlockDurationMinutes(settings.blockDurationMinutes ?? 30)
+          setEnableHalfHourAlerts(settings.enableHalfHourAlerts ?? true)
+        } else {
+          // If API fails, set default to enable half-hour alerts
+          setEnableHalfHourAlerts(true)
+        }
+      } catch (error) {
+        console.warn('Failed to load settings:', error)
+        // If API fails, set default to enable half-hour alerts
+        setEnableHalfHourAlerts(true)
+      }
+    }
+    loadSettings()
+  }, [])
 
   // Initialize current time on client side to avoid hydration mismatch
   useEffect(() => {
@@ -2331,7 +2366,7 @@ export default function TimeTracker() {
               <span className="text-sm font-medium">Half-hour Alerts:</span>
               <Button
                 variant={enableHalfHourAlerts ? "default" : "secondary"}
-                onClick={() => setEnableHalfHourAlerts((v) => !v)}
+                onClick={toggleHalfHourAlerts}
                 className="min-w-28"
                 title="Announce at :29 and :59 using a male voice"
               >
