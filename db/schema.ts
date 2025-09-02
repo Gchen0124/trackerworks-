@@ -132,3 +132,12 @@ export const blockSnapshots = sqliteTable("block_snapshots", {
   snapshotData: text("snapshot_data", { mode: "json" }), // Full time blocks array
   createdAt: integer("created_at", { mode: "timestamp_ms" }).default(() => Date.now()),
 })
+
+// User notes for the todos panel
+export const userNotes = sqliteTable("user_notes", {
+  id: text("id").primaryKey().default("daily_notes"),
+  date: text("date").notNull(), // YYYY-MM-DD format
+  content: text("content").default(""),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).default(() => Date.now()),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).default(() => Date.now()),
+})

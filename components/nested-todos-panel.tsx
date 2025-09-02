@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Plus, Trash2, ChevronRight, ChevronDown, RefreshCw } from "lucide-react"
 
@@ -26,6 +27,8 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
   const [tree, setTree] = useState<Record<string, ItemRow[]>>({}) // key = `${goalKey}|${parentId||"root"}`
   const [loading, setLoading] = useState<Record<string, boolean>>({})
   const [refreshKey, setRefreshKey] = useState(0)
+  const [notes, setNotes] = useState<string>("")
+  const [notesSaving, setNotesSaving] = useState(false)
 
   // Local done state persisted in localStorage
   const STORAGE_KEY = "nestedTodosDone:v1"
@@ -79,10 +82,51 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     }
   }, [dateStr])
 
+  // Load today's notes
+  const loadNotes = useCallback(async () => {
+    try {
+      const qs = new URLSearchParams()
+      qs.set("date", dateStr)
+      const res = await fetch(`/api/local/notes?${qs.toString()}`)
+      if (!res.ok) throw new Error("failed_notes")
+      const data = await res.json()
+      setNotes(data?.content || "")
+    } catch (e) {
+      console.warn("Failed to load notes:", e)
+    }
+  }, [dateStr])
+
+  // Save notes with debouncing
+  const saveNotes = useCallback(async (content: string) => {
+    setNotesSaving(true)
+    try {
+      const res = await fetch('/api/local/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: dateStr, content })
+      })
+      if (!res.ok) throw new Error("failed_save_notes")
+    } catch (e) {
+      console.warn("Failed to save notes:", e)
+    } finally {
+      setNotesSaving(false)
+    }
+  }, [dateStr])
+
+  // Debounced save for notes
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      saveNotes(notes) // Save all notes, including empty ones to clear previous content
+    }, 1000) // Save 1 second after user stops typing
+    
+    return () => clearTimeout(timeout)
+  }, [notes, saveNotes])
+
   useEffect(() => {
     if (!open) return
     loadGoals()
-  }, [open, loadGoals, refreshKey])
+    loadNotes()
+  }, [open, loadGoals, loadNotes, refreshKey])
 
   // Sync goal labels live when DailyGoals broadcasts updates
   useEffect(() => {
@@ -208,10 +252,19 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
           </div>
         </div>
 
-        {/* Reserved notes/AI area */}
+        {/* Notes area */}
         <div className="px-3 py-2 border-b border-zinc-900/60">
-          <div className="h-16 rounded-md bg-zinc-900/40 border border-zinc-800 flex items-center justify-center text-xs text-zinc-500">
-            Notes / AI chat coming soon
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-medium text-zinc-300">Daily Notes</div>
+              {notesSaving && <div className="text-xs text-zinc-500">Saving...</div>}
+            </div>
+            <Textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Add your notes for today..."
+              className="h-20 resize-none bg-zinc-900/40 border-zinc-800 text-zinc-100 placeholder:text-zinc-500 text-sm overflow-y-auto"
+            />
           </div>
         </div>
 

@@ -1815,84 +1815,6 @@ export default function TimeTracker() {
       isCompleted: !!b.isCompleted,
     })
     if (blockDurationMinutes === 30) {
-
-    // Active window derived metrics helpers
-    const formatMinAsHHMM = (m: number) => {
-      const hh = Math.floor(m / 60).toString().padStart(2, '0')
-      const mm = (m % 60).toString().padStart(2, '0')
-      return `${hh}:${mm}`
-    }
-    const activeStartMin = activeWindow?.activeStartMinute ?? null
-    const activeEndMin = activeWindow?.activeEndMinute ?? null
-    const totalActiveMinutes = (activeStartMin != null && activeEndMin != null && activeEndMin > activeStartMin) ? (activeEndMin - activeStartMin) : null
-    const activeBlocksCount = totalActiveMinutes != null ? Math.floor(totalActiveMinutes / blockDurationMinutes) : null
-
-    // --- Focus Overview derived metrics ---
-    const isWindowValid = activeStartMin != null && activeEndMin != null && (activeEndMin as number) > (activeStartMin as number)
-    const nowIdx = currentTime ? (currentTime.getHours() * 60 + currentTime.getMinutes()) : null
-    const blocksToTime = (n: number) => {
-      const mins = n * blockDurationMinutes
-      const hh = Math.floor(mins / 60)
-      const mm = mins % 60
-      return `${hh}h ${mm}m`
-    }
-    const parseIdx = (hhmm: string) => {
-      const [h, m] = hhmm.split(":").map(Number)
-      return h * 60 + m
-    }
-    const inactiveCount = isWindowValid ? timeBlocks.reduce((acc, b) => {
-      const s = parseIdx(b.startTime), e = parseIdx(b.endTime)
-      return acc + ((e <= (activeStartMin as number) || s >= (activeEndMin as number)) ? 1 : 0)
-    }, 0) : 0
-    const availableCount = Math.max(0, totalBlocks - inactiveCount)
-    const activePassedBlocks = (isWindowValid && nowIdx != null) ? timeBlocks.reduce((acc, b) => {
-      const s = parseIdx(b.startTime), e = parseIdx(b.endTime)
-      const inside = !(e <= (activeStartMin as number) || s >= (activeEndMin as number))
-      return acc + (inside && e <= nowIdx ? 1 : 0)
-    }, 0) : 0
-    const activeLeftBlocks = (isWindowValid && nowIdx != null) ? timeBlocks.reduce((acc, b) => {
-      const s = parseIdx(b.startTime), e = parseIdx(b.endTime)
-      const inside = !(e <= (activeStartMin as number) || s >= (activeEndMin as number))
-      return acc + (inside && s >= nowIdx ? 1 : 0)
-    }, 0) : 0
-    // Goals via DailyGoals snapshot only
-    const goalsForToday = [
-      { id: 'goal_1', label: dailyGoals[0] || 'Goal 1' },
-      { id: 'goal_2', label: dailyGoals[1] || 'Goal 2' },
-      { id: 'goal_3', label: dailyGoals[2] || 'Goal 3' },
-    ]
-    const goalsAchieved = goalsForToday.filter(g => timeBlocks.some(b => b.goal?.id === g.id && b.isCompleted))
-    const goalsUnfinished = (isWindowValid && nowIdx != null)
-      ? goalsForToday.filter(g => timeBlocks.some(b => {
-          const s = parseIdx(b.startTime), e = parseIdx(b.endTime)
-          const inside = !(e <= (activeStartMin as number) || s >= (activeEndMin as number))
-          return b.goal?.id === g.id && inside && s >= nowIdx && !b.isCompleted
-        }))
-      : []
-    // Tasks done/undone: unique titles with counts
-    const isNoise = (t?: string) => !!t && (t.includes('Paused') || t.includes('Disrupted') || t.includes('Interrupted'))
-    const tasksDoneMap = new Map<string, number>()
-    const tasksUndoneMap = new Map<string, number>()
-    timeBlocks.forEach(b => {
-      const title = b.task?.title || undefined
-      if (!title || isNoise(title)) return
-      if (b.isCompleted) {
-        tasksDoneMap.set(title, (tasksDoneMap.get(title) || 0) + 1)
-      } else if (isWindowValid && nowIdx != null) {
-        const s = parseIdx(b.startTime), e = parseIdx(b.endTime)
-        const inside = !(e <= (activeStartMin as number) || s >= (activeEndMin as number))
-        if (inside && s >= nowIdx) tasksUndoneMap.set(title, (tasksUndoneMap.get(title) || 0) + 1)
-      }
-    })
-    const toList = (m: Map<string, number>, cap = 5) => {
-      const arr = Array.from(m.entries()).sort((a,b) => b[1]-a[1])
-      const more = Math.max(0, arr.length - cap)
-      return { top: arr.slice(0, cap), more }
-    }
-    const tasksDone = toList(tasksDoneMap)
-    const tasksUndone = toList(tasksUndoneMap)
-
-
       snapshot30Ref.current = timeBlocks.map(deepCopy)
     } else if (blockDurationMinutes === 3) {
       snapshot3Ref.current = timeBlocks.map(deepCopy)
@@ -1901,6 +1823,69 @@ export default function TimeTracker() {
     setShowDurationSelector(false)
     // Clear any existing tasks when changing duration to avoid confusion
     setRecentChanges([])
+  }
+
+  // Calculate focus blocks vs unproductive blocks statistics
+  const calculateBlockStatistics = () => {
+    const now = currentTime || new Date()
+    const currentBlockId = getCurrentBlockId(now)
+    const currentBlockIndex = getBlockIndex(currentBlockId)
+    
+    let focusBlocks = 0 // Green blocks
+    let unproductiveBlocks = 0 // Red blocks
+    
+    timeBlocks.forEach((block, index) => {
+      // Only count past blocks and current block if it's completed
+      if (index > currentBlockIndex) return
+      
+      const isNoise = (title?: string) => 
+        title && (title.includes('Paused') || title.includes('Disrupted') || title.includes('Interrupted'))
+      
+      // Count focus blocks (green)
+      if (block.isCompleted && block.task && !isNoise(block.task.title)) {
+        focusBlocks++
+      }
+      // Count unproductive blocks (red)
+      else if (
+        // Interrupted/Paused/Disrupted blocks
+        (block.task && isNoise(block.task.title)) ||
+        // Past active blocks that are blank (no task but was active)
+        (index < currentBlockIndex && block.isActive && !block.task) ||
+        // Past blocks that were active but not completed and had tasks
+        (index < currentBlockIndex && block.isActive && block.task && !block.isCompleted && !isNoise(block.task.title))
+      ) {
+        unproductiveBlocks++
+      }
+    })
+    
+    return { focusBlocks, unproductiveBlocks }
+  }
+
+  const { focusBlocks, unproductiveBlocks } = calculateBlockStatistics()
+
+  // Active window derived metrics helpers  
+  const formatMinAsHHMM = (m: number) => {
+    const hh = Math.floor(m / 60).toString().padStart(2, '0')
+    const mm = (m % 60).toString().padStart(2, '0')
+    return `${hh}:${mm}`
+  }
+  const activeStartMin = activeWindow?.activeStartMinute ?? null
+  const activeEndMin = activeWindow?.activeEndMinute ?? null
+  const totalActiveMinutes = (activeStartMin != null && activeEndMin != null && activeEndMin > activeStartMin) ? (activeEndMin - activeStartMin) : null
+  const activeBlocksCount = totalActiveMinutes != null ? Math.floor(totalActiveMinutes / blockDurationMinutes) : null
+
+  // --- Focus Overview derived metrics ---
+  const isWindowValid = activeStartMin != null && activeEndMin != null && (activeEndMin as number) > (activeStartMin as number)
+  const nowIdx = currentTime ? (currentTime.getHours() * 60 + currentTime.getMinutes()) : null
+  const blocksToTime = (n: number) => {
+    const mins = n * blockDurationMinutes
+    const hh = Math.floor(mins / 60)
+    const mm = mins % 60
+    return `${hh}h ${mm}m`
+  }
+  const parseIdx = (hhmm: string) => {
+    const [h, m] = hhmm.split(":").map(Number)
+    return h * 60 + m
   }
 
   // Calculate grid columns based on block duration for better layout
@@ -1919,22 +1904,6 @@ export default function TimeTracker() {
   const totalBlocks = timeBlocks.length
   const blocksPerHour = 60 / blockDurationMinutes
 
-
-  // Focus Overview metrics (component scope)
-  const activeStartMin = activeWindow?.activeStartMinute ?? null
-  const activeEndMin = activeWindow?.activeEndMinute ?? null
-  const isWindowValid = activeStartMin != null && activeEndMin != null && activeEndMin > activeStartMin
-  const nowIdx = currentTime ? (currentTime.getHours() * 60 + currentTime.getMinutes()) : null
-  const blocksToTime = (n: number) => {
-    const mins = n * blockDurationMinutes
-    const hh = Math.floor(mins / 60)
-    const mm = mins % 60
-    return `${hh}h ${mm}m`
-  }
-  const parseIdx = (hhmm: string) => {
-    const [h, m] = hhmm.split(":").map(Number)
-    return h * 60 + m
-  }
   const inactiveCount = isWindowValid ? timeBlocks.reduce((acc, b) => {
     const s = parseIdx(b.startTime), e = parseIdx(b.endTime)
     return acc + ((e <= (activeStartMin as number) || s >= (activeEndMin as number)) ? 1 : 0)
@@ -2049,6 +2018,18 @@ export default function TimeTracker() {
   // Handle progress check responses
   const handleProgressDone = () => {
     if (progressCheckTimer) clearTimeout(progressCheckTimer)
+    
+    // Mark the completed block as successfully completed (green)
+    if (completedBlockId) {
+      setTimeBlocks((prev) =>
+        prev.map((block) => 
+          block.id === completedBlockId 
+            ? { ...block, isCompleted: true, isActive: false }
+            : block
+        ),
+      )
+    }
+    
     setShowProgressCheck(false)
     setCompletedBlockId(null)
     setProgressCheckTimer(null)
@@ -2092,6 +2073,9 @@ export default function TimeTracker() {
         id: `note-${Date.now()}`,
         title: `${completedTask.title} + pushed to future`,
       }
+      // Mark the completed block as successfully completed (green) with "stick to plan"
+      updated[completedIndex].isCompleted = true
+      updated[completedIndex].isActive = false
     }
 
     setTimeBlocks(updated)
@@ -2115,6 +2099,7 @@ export default function TimeTracker() {
     const completedBlock = timeBlocks.find((b) => b.id === completedBlockId)
     if (!completedBlock?.task) return
 
+    // Mark the completed block as successfully completed (green) even if still doing
     // Continue with same task in next block and push all future tasks forward
     const currentBlockId = getCurrentBlockId(currentTime || new Date())
     const currentBlockIndex = getBlockIndex(currentBlockId)
@@ -2135,6 +2120,15 @@ export default function TimeTracker() {
           ...updatedBlocks[completedBlockIndex].task!,
           title: overrideTitle,
         },
+        isCompleted: true,  // Mark as completed (green)
+        isActive: false,
+      }
+    } else if (completedBlockIndex >= 0) {
+      // Mark the completed block as successfully completed (green)
+      updatedBlocks[completedBlockIndex] = {
+        ...updatedBlocks[completedBlockIndex],
+        isCompleted: true,
+        isActive: false,
       }
     }
 
@@ -2172,6 +2166,99 @@ export default function TimeTracker() {
     setTimeBlocks((prev) =>
       prev.map((block) => (block.id === currentBlockId ? { ...block, isActive: true } : { ...block, isActive: false })),
     )
+  }
+
+  const handleProgressClose = () => {
+    if (progressCheckTimer) clearTimeout(progressCheckTimer)
+    if (!completedBlockId) return
+
+    const completedBlockIndex = getBlockIndex(completedBlockId)
+    const nextBlockId = getCurrentBlockId(currentTime || new Date())
+    const nextBlockIndex = getBlockIndex(nextBlockId)
+
+    // Step 1: Move all future tasks 2 blocks away (to make room for the undone task)
+    const updatedBlocks = [...timeBlocks]
+    let { updatedBlocks: movedBlocks } = pushTasksForward(
+      nextBlockIndex + 1, // Start from the block after current
+      2, // Push by 2 blocks
+    )
+    updatedBlocks.splice(0, updatedBlocks.length, ...movedBlocks)
+
+    const completedBlock = updatedBlocks[completedBlockIndex]
+
+    if (completedBlock?.task &&
+        !completedBlock.task.title?.includes("Paused") &&
+        !completedBlock.task.title?.includes("Disrupted") &&
+        !completedBlock.task.title?.includes("Interrupted")) {
+
+      // The target should be exactly 2 blocks after the current block (nextBlockIndex + 2)
+      let targetIndex = nextBlockIndex + 2
+
+      if (targetIndex < updatedBlocks.length) {
+        const taskToMove = { ...completedBlock.task }
+
+        // Clear the original position first
+        updatedBlocks[completedBlockIndex].task = undefined
+
+        // Place the task in the target position
+        updatedBlocks[targetIndex] = {
+          ...updatedBlocks[targetIndex],
+          task: { ...taskToMove, id: `deferred-${Date.now()}` },
+          isRecentlyMoved: true,
+        }
+
+        // Clear recently moved after 2 seconds
+        setTimeout(() => {
+          setTimeBlocks((prev) =>
+            prev.map((block) => (block.id === updatedBlocks[targetIndex].id ? { ...block, isRecentlyMoved: false } : block)),
+          )
+        }, 2000)
+      }
+    }
+
+    // Step 3: Mark the completed block as "Interrupted - User Closed"
+    if (completedBlockIndex >= 0 && completedBlockIndex < updatedBlocks.length) {
+      updatedBlocks[completedBlockIndex] = {
+        ...updatedBlocks[completedBlockIndex],
+        isActive: false,
+        isCompleted: false,
+        task: {
+          id: `interrupted-close-${Date.now()}`,
+          title: "Interrupted - User Closed",
+          type: "custom",
+          color: "bg-red-500",
+        },
+      }
+    }
+
+    // Step 4: Mark the current block as "Paused"
+    updatedBlocks[nextBlockIndex].task = {
+      id: `paused-${Date.now()}`,
+      title: "Paused - Previous Interruption",
+      type: "custom",
+      color: "bg-gray-500",
+    }
+
+    setTimeBlocks(updatedBlocks)
+
+    const change: TaskChange = {
+      type: "push",
+      blockId: completedBlockId,
+      oldTask: completedBlock?.task,
+      newTask: {
+        id: `interrupted-close-${Date.now()}`,
+        title: "Interrupted - User Closed",
+        type: "custom",
+        color: "bg-red-500",
+      },
+      affectedBlocks: [nextBlockId],
+      timestamp: new Date(),
+    }
+    setRecentChanges((prev) => [change, ...prev.slice(0, 4)])
+
+    setShowProgressCheck(false)
+    setCompletedBlockId(null)
+    setProgressCheckTimer(null)
   }
 
   const handleProgressTimeout = (nextBlockId: string) => {
@@ -2470,6 +2557,19 @@ export default function TimeTracker() {
               <span className="flex items-center gap-2">
                 <Calendar className="h-5 w-5" />
                 24-Hour Time Grid ({blockDurationMinutes}-minute blocks)
+                <div className="flex items-center gap-3 ml-4">
+                  <div className="flex items-center gap-1 text-sm">
+                    <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                    <span className="font-medium text-green-700">{focusBlocks}</span>
+                    <span className="text-gray-500">focus</span>
+                  </div>
+                  <div className="text-gray-400">vs</div>
+                  <div className="flex items-center gap-1 text-sm">
+                    <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                    <span className="font-medium text-red-700">{unproductiveBlocks}</span>
+                    <span className="text-gray-500">unproductive</span>
+                  </div>
+                </div>
               </span>
               <div className="flex items-center gap-2">
                 {planningMode.isActive && (
@@ -2978,7 +3078,7 @@ export default function TimeTracker() {
             onStillDoing={handleProgressStillDoing}
             onStickToPlan={handleProgressStickToPlan}
             onTimeout={() => handleProgressTimeout(getCurrentBlockId(currentTime || new Date()))}
-            onClose={() => handleProgressTimeout(getCurrentBlockId(currentTime || new Date()))}
+            onClose={() => handleProgressClose()}
             isCurrentPinned={(() => {
               const currId = getCurrentBlockId(currentTime || new Date())
               const blk = timeBlocks.find((b) => b.id === currId)
