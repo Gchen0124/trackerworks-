@@ -82,14 +82,32 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     }
   }, [dateStr])
 
-  // Load today's notes
+  // Load today's notes, fallback to most recent previous note if empty
   const loadNotes = useCallback(async () => {
     try {
+      // First try to load today's notes
       const qs = new URLSearchParams()
       qs.set("date", dateStr)
       const res = await fetch(`/api/local/notes?${qs.toString()}`)
       if (!res.ok) throw new Error("failed_notes")
       const data = await res.json()
+      
+      // If today's notes are empty, try to load the most recent previous note
+      if (!data?.content || data.content.trim() === "") {
+        try {
+          const prevRes = await fetch(`/api/local/notes/latest`)
+          if (prevRes.ok) {
+            const prevData = await prevRes.json()
+            if (prevData?.content && prevData.content.trim() !== "") {
+              setNotes(prevData.content)
+              return
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to load previous note:", e)
+        }
+      }
+      
       setNotes(data?.content || "")
     } catch (e) {
       console.warn("Failed to load notes:", e)

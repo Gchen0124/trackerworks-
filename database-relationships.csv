@@ -1,0 +1,79 @@
+From_Table,From_Field,To_Table,To_Field,Relationship_Type,Cardinality,Purpose,Implementation_Notes
+users,id,sessions,user_id,Foreign Key,One-to-Many,User session ownership,User can have multiple daily sessions
+users,id,time_blocks,user_id,Foreign Key,One-to-Many,Time block ownership,All blocks belong to specific user
+users,id,tasks,user_id,Foreign Key,One-to-Many,Task ownership,User creates and owns tasks
+users,id,goals,user_id,Foreign Key,One-to-Many,Goal ownership,User defines personal goals
+users,id,ui_preferences,user_id,Foreign Key,One-to-Many,User settings,Customizable interface preferences
+
+sessions,id,time_blocks,session_id,Foreign Key,One-to-Many,Session block organization,Daily blocks grouped by session
+sessions,user_id,users,id,Foreign Key,Many-to-One,Session ownership,Each session belongs to one user
+
+time_blocks,id,task_assignments,time_block_id,Foreign Key,One-to-Many,Block-task relationships,Blocks can have multiple tasks
+time_blocks,id,goal_assignments,time_block_id,Foreign Key,One-to-Many,Block-goal relationships,Blocks contribute to goals
+time_blocks,id,progress_events,time_block_id,Foreign Key,One-to-Many,Progress tracking,Track events within blocks
+time_blocks,id,timer_sessions,time_block_id,Foreign Key,One-to-Many,Timer management,Time blocks can have multiple timer sessions
+time_blocks,id,tracking_logs,time_block_id,Foreign Key,One-to-Many,Detailed tracking,Comprehensive block activity logging
+
+tasks,id,task_assignments,task_id,Foreign Key,One-to-Many,Task assignments,Tasks can be assigned to multiple blocks
+tasks,id,progress_events,task_id,Foreign Key,One-to-Many,Task progress tracking,Track progress on specific tasks
+tasks,id,timer_sessions,task_id,Foreign Key,One-to-Many,Task timing,Time spent on specific tasks
+tasks,id,notion_pages,task_id,Foreign Key,One-to-One,Notion integration,Link local tasks to Notion pages
+tasks,id,drag_operations,task_id,Foreign Key,One-to-Many,Drag tracking,Track task movements
+tasks,id,voice_interactions,task_created,JSON Reference,One-to-Many,Voice task creation,Tasks created via voice commands
+tasks,id,tracking_logs,task_id,Foreign Key,One-to-Many,Task tracking,Detailed task performance logs
+
+goals,id,goal_assignments,goal_id,Foreign Key,One-to-Many,Goal progress tracking,Goals achieved through multiple blocks
+goals,id,progress_events,goal_id,Foreign Key,One-to-Many,Goal progress events,Track goal-related progress
+goals,id,planning_logs,objectives,JSON Reference,One-to-Many,Planning integration,Goals as planning objectives
+
+task_assignments,time_block_id,time_blocks,id,Foreign Key,Many-to-One,Block reference,Assignment belongs to specific block
+task_assignments,task_id,tasks,id,Foreign Key,Many-to-One,Task reference,Assignment references specific task
+task_assignments,user_id,users,id,Foreign Key,Many-to-One,Assignment ownership,Track who made assignment
+
+goal_assignments,time_block_id,time_blocks,id,Foreign Key,Many-to-One,Block reference,Assignment belongs to specific block
+goal_assignments,goal_id,goals,id,Foreign Key,Many-to-One,Goal reference,Assignment references specific goal
+goal_assignments,user_id,users,id,Foreign Key,Many-to-One,Assignment ownership,Track who made assignment
+
+progress_events,user_id,users,id,Foreign Key,Many-to-One,Event ownership,User who triggered event
+progress_events,time_block_id,time_blocks,id,Foreign Key,Many-to-One,Block context,Event occurred in specific block
+progress_events,task_id,tasks,id,Foreign Key,Many-to-One,Task context,Event related to specific task
+progress_events,goal_id,goals,id,Foreign Key,Many-to-One,Goal context,Event contributes to goal
+
+timer_sessions,user_id,users,id,Foreign Key,Many-to-One,Session ownership,User who started timer
+timer_sessions,time_block_id,time_blocks,id,Foreign Key,Many-to-One,Block timing,Timer runs within specific block
+timer_sessions,task_id,tasks,id,Foreign Key,Many-to-One,Task timing,Timer tracks specific task
+
+drag_operations,user_id,users,id,Foreign Key,Many-to-One,Operation ownership,User who performed drag
+drag_operations,task_id,tasks,id,Foreign Key,Many-to-One,Moved task,Task that was dragged
+drag_operations,source_block_id,time_blocks,id,Foreign Key,Many-to-One,Source location,Where drag originated
+
+planning_sessions,user_id,users,id,Foreign Key,Many-to-One,Session ownership,User conducting planning
+planning_sessions,start_block_id,time_blocks,id,Foreign Key,Many-to-One,Planning range start,First block in planning range
+planning_sessions,end_block_id,time_blocks,id,Foreign Key,Many-to-One,Planning range end,Last block in planning range
+
+voice_interactions,user_id,users,id,Foreign Key,Many-to-One,Interaction ownership,User speaking to system
+
+calendar_events,user_id,users,id,Foreign Key,Many-to-One,Event ownership,User's calendar events
+
+calendar_integrations,user_id,users,id,Foreign Key,Many-to-One,Integration ownership,User's calendar connections
+
+notion_integrations,user_id,users,id,Foreign Key,Many-to-One,Integration ownership,User's Notion connections
+
+notion_databases,user_id,users,id,Foreign Key,Many-to-One,Database ownership,User's accessible databases
+notion_databases,integration_id,notion_integrations,id,Foreign Key,Many-to-One,Integration reference,Database belongs to integration
+
+notion_pages,user_id,users,id,Foreign Key,Many-to-One,Page ownership,User's Notion pages
+notion_pages,database_id,notion_databases,id,Foreign Key,Many-to-One,Database reference,Page belongs to database
+notion_pages,task_id,tasks,id,Foreign Key,One-to-One,Task linkage,Notion page linked to local task
+
+ui_preferences,user_id,users,id,Foreign Key,Many-to-One,Preference ownership,User's UI settings
+
+analytics_events,user_id,users,id,Foreign Key,Many-to-One,Event ownership,User's activity events
+
+planning_logs,user_id,users,id,Foreign Key,Many-to-One,Log ownership,User's planning sessions
+planning_logs,session_id,sessions,id,Foreign Key,Many-to-One,Session reference,Planning within specific session
+
+tracking_logs,user_id,users,id,Foreign Key,Many-to-One,Log ownership,User's tracking data
+tracking_logs,session_id,sessions,id,Foreign Key,Many-to-One,Session reference,Tracking within specific session
+tracking_logs,time_block_id,time_blocks,id,Foreign Key,Many-to-One,Block reference,Tracking specific block
+tracking_logs,task_id,tasks,id,Foreign Key,Many-to-One,Task reference,Tracking specific task

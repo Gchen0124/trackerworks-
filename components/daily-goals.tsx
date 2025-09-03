@@ -71,30 +71,57 @@ export default function DailyGoals() {
     setLoading(true)
     setError(null)
 
-    // Prefer Notion; if fails, fall back to local
     try {
-      // 1) Try local DB first
+      // 1) Try local DB first for today's date
       let res = await fetch(`/api/local/goals?date=${dateStr}`)
       if (!res.ok) {
         // 2) Fallback to Notion-backed API
         res = await fetch(`/api/goals?date=${dateStr}`)
       }
-      if (!res.ok) throw new Error("Failed to load goals from Notion")
+      if (!res.ok) throw new Error("Failed to load goals")
       const data: GoalsResponse = await res.json()
 
-      const filled: GoalsResponse = {
-        date: data.date,
-        weeklyGoal: data.weeklyGoal || "",
-        goals: [data.goals?.[0] || "", data.goals?.[1] || "", data.goals?.[2] || ""],
-        pageId: data.pageId,
-        source: "notion",
-        excitingGoal: (data as any)?.excitingGoal || "",
-        eoyGoal: (data as any)?.eoyGoal || "",
-        monthlyGoal: (data as any)?.monthlyGoal || "",
+      // Check if today's goals are empty and if so, try to load yesterday's goals
+      const hasAnyGoals = data.weeklyGoal || data.goals?.some(g => g) || data.excitingGoal || data.eoyGoal || data.monthlyGoal
+      
+      let finalData = data
+      if (!hasAnyGoals) {
+        try {
+          // Try to load yesterday's goals if they exist and are not completed
+          const yesterdayRes = await fetch(`/api/local/goals/yesterday?date=${dateStr}`)
+          if (yesterdayRes.ok) {
+            const yesterdayData = await yesterdayRes.json()
+            const hasYesterdayGoals = yesterdayData.weeklyGoal || yesterdayData.goals?.some(g => g) || 
+                                      yesterdayData.excitingGoal || yesterdayData.eoyGoal || yesterdayData.monthlyGoal
+            
+            if (hasYesterdayGoals) {
+              // Use yesterday's goals but keep today's date
+              finalData = {
+                ...yesterdayData,
+                date: dateStr, // Keep today's date
+                source: "local"
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to load yesterday's goals:", e)
+        }
       }
+
+      const filled: GoalsResponse = {
+        date: finalData.date,
+        weeklyGoal: finalData.weeklyGoal || "",
+        goals: [finalData.goals?.[0] || "", finalData.goals?.[1] || "", finalData.goals?.[2] || ""],
+        pageId: finalData.pageId,
+        source: "local",
+        excitingGoal: finalData.excitingGoal || "",
+        eoyGoal: finalData.eoyGoal || "",
+        monthlyGoal: finalData.monthlyGoal || "",
+      }
+      
       setWeeklyGoal(filled.weeklyGoal)
       setGoals(filled.goals)
-      setSource((data as any)?.source === 'local' ? 'local' : 'notion')
+      setSource(filled.source as any)
       setExcitingGoal(filled.excitingGoal || "")
       setEoyGoal(filled.eoyGoal || "")
       setMonthlyGoal(filled.monthlyGoal || "")

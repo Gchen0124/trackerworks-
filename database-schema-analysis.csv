@@ -1,0 +1,277 @@
+TABLE_NAME,FIELD_NAME,DATA_TYPE,CONSTRAINTS,DESCRIPTION,PURPOSE
+users,id,TEXT,PRIMARY KEY,Unique user identifier,User management system
+users,email,TEXT,UNIQUE NOT NULL,User email address,Authentication and contact
+users,name,TEXT,NOT NULL,User full name,Display name
+users,timezone,TEXT,DEFAULT 'UTC',User timezone,Localization
+users,preferences,TEXT,JSON DEFAULT '{}',User preferences JSON,Settings storage
+users,created_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Creation timestamp,Audit trail
+users,updated_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Last update timestamp,Audit trail
+
+sessions,id,TEXT,PRIMARY KEY,Session identifier,User session tracking
+sessions,user_id,TEXT,REFERENCES users(id),Foreign key to user,Session ownership
+sessions,start_date,TEXT,NOT NULL,Session start date (YYYY-MM-DD),Daily session tracking
+sessions,end_date,TEXT,NULL,Session end date (YYYY-MM-DD),Session completion
+sessions,active_window_start,INTEGER,NULL,Active window start minute (0-1439),Work hours definition
+sessions,active_window_end,INTEGER,NULL,Active window end minute (0-1439),Work hours definition
+sessions,block_duration_minutes,INTEGER,DEFAULT 30,Time block duration,Block size configuration
+sessions,session_metadata,TEXT,JSON DEFAULT '{}',Session configuration JSON,Flexible settings
+sessions,created_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Creation timestamp,Audit trail
+
+time_blocks,id,TEXT,PRIMARY KEY,Time block identifier (date|duration|startMin),Time block management
+time_blocks,user_id,TEXT,REFERENCES users(id),Foreign key to user,Block ownership
+time_blocks,session_id,TEXT,REFERENCES sessions(id),Foreign key to session,Session association
+time_blocks,date,TEXT,NOT NULL,Block date (YYYY-MM-DD),Date organization
+time_blocks,start_minute,INTEGER,NOT NULL,Start minute of day (0-1439),Time positioning
+time_blocks,end_minute,INTEGER,NOT NULL,End minute of day (0-1439),Time positioning
+time_blocks,duration_minutes,INTEGER,NOT NULL,Block duration in minutes,Block size
+time_blocks,status,TEXT,DEFAULT 'future',Block status (past|current|future|active|completed),State tracking
+time_blocks,is_pinned,INTEGER,DEFAULT 0,Pin status prevents auto-move,Task protection
+time_blocks,is_recently_moved,INTEGER,DEFAULT 0,Visual feedback flag,UI indication
+time_blocks,created_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Creation timestamp,Audit trail
+time_blocks,updated_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Last update timestamp,Audit trail
+
+tasks,id,TEXT,PRIMARY KEY,Task identifier,Task management
+tasks,user_id,TEXT,REFERENCES users(id),Foreign key to user,Task ownership
+tasks,title,TEXT,NOT NULL,Task title,Display name
+tasks,description,TEXT,NULL,Task description,Additional details
+tasks,type,TEXT,DEFAULT 'custom',Task type (calendar|notion|custom|voice),Source classification
+tasks,status,TEXT,DEFAULT 'pending',Task status (pending|active|completed|cancelled),State tracking
+tasks,priority,TEXT,DEFAULT 'medium',Task priority (low|medium|high|urgent),Prioritization
+tasks,color,TEXT,DEFAULT 'bg-blue-500',UI color class,Visual categorization
+tasks,estimated_duration,INTEGER,NULL,Estimated duration in minutes,Planning
+tasks,actual_duration,INTEGER,NULL,Actual duration in minutes,Tracking
+tasks,source_id,TEXT,NULL,External source identifier,Integration
+tasks,source_url,TEXT,NULL,External source URL,Integration
+tasks,tags,TEXT,JSON DEFAULT '[]',Task tags array,Categorization
+tasks,metadata,TEXT,JSON DEFAULT '{}',Additional task data,Flexible storage
+tasks,created_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Creation timestamp,Audit trail
+tasks,updated_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Last update timestamp,Audit trail
+
+task_assignments,id,TEXT,PRIMARY KEY,Assignment identifier,Block-task relationship
+task_assignments,user_id,TEXT,REFERENCES users(id),Foreign key to user,Assignment ownership
+task_assignments,time_block_id,TEXT,REFERENCES time_blocks(id),Foreign key to time block,Block association
+task_assignments,task_id,TEXT,REFERENCES tasks(id),Foreign key to task,Task association
+task_assignments,assignment_type,TEXT,DEFAULT 'manual',Assignment type (manual|auto|voice|drag),Source tracking
+task_assignments,sequence_number,INTEGER,DEFAULT 1,Sequence in multi-block tasks,Ordering
+task_assignments,is_primary,INTEGER,DEFAULT 1,Primary assignment flag,Main task indicator
+task_assignments,created_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Creation timestamp,Audit trail
+task_assignments,updated_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Last update timestamp,Audit trail
+
+goals,id,TEXT,PRIMARY KEY,Goal identifier,Goal management
+goals,user_id,TEXT,REFERENCES users(id),Foreign key to user,Goal ownership
+goals,title,TEXT,NOT NULL,Goal title,Display name
+goals,description,TEXT,NULL,Goal description,Additional details
+goals,goal_type,TEXT,NOT NULL,Goal type (daily|weekly|monthly|yearly|exciting|eoy),Time scope
+goals,target_date,TEXT,NULL,Target completion date (YYYY-MM-DD),Deadline
+goals,status,TEXT,DEFAULT 'active',Goal status (active|completed|cancelled|postponed),State tracking
+goals,priority,TEXT,DEFAULT 'medium',Goal priority (low|medium|high|urgent),Prioritization
+goals,color,TEXT,DEFAULT 'bg-green-500',UI color class,Visual categorization
+goals,progress_percentage,INTEGER,DEFAULT 0,Progress percentage (0-100),Progress tracking
+goals,metadata,TEXT,JSON DEFAULT '{}',Additional goal data,Flexible storage
+goals,created_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Creation timestamp,Audit trail
+goals,updated_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Last update timestamp,Audit trail
+
+goal_assignments,id,TEXT,PRIMARY KEY,Goal assignment identifier,Block-goal relationship
+goal_assignments,user_id,TEXT,REFERENCES users(id),Foreign key to user,Assignment ownership
+goal_assignments,time_block_id,TEXT,REFERENCES time_blocks(id),Foreign key to time block,Block association
+goal_assignments,goal_id,TEXT,REFERENCES goals(id),Foreign key to goal,Goal association
+goal_assignments,assignment_weight,REAL,DEFAULT 1.0,Weight of this block toward goal,Progress calculation
+goal_assignments,created_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Creation timestamp,Audit trail
+
+progress_events,id,TEXT,PRIMARY KEY,Progress event identifier,Progress tracking
+progress_events,user_id,TEXT,REFERENCES users(id),Foreign key to user,Event ownership
+progress_events,time_block_id,TEXT,REFERENCES time_blocks(id),Foreign key to time block,Block association
+progress_events,task_id,TEXT,REFERENCES tasks(id) NULL,Foreign key to task,Task association
+progress_events,goal_id,TEXT,REFERENCES goals(id) NULL,Foreign key to goal,Goal association
+progress_events,event_type,TEXT,NOT NULL,Event type (start|pause|resume|complete|interrupt|timeout),Action classification
+progress_events,response_type,TEXT,NULL,User response (done|still_doing|stick_to_plan|timeout),Progress check response
+progress_events,response_time_ms,INTEGER,NULL,Response time in milliseconds,Interaction speed
+progress_events,override_title,TEXT,NULL,Custom task title override,User corrections
+progress_events,voice_transcript,TEXT,NULL,Voice command transcript,Voice interaction
+progress_events,cascading_effects,TEXT,JSON DEFAULT '[]',Affected block IDs array,Change tracking
+progress_events,metadata,TEXT,JSON DEFAULT '{}',Additional event data,Flexible storage
+progress_events,occurred_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Event timestamp,Time tracking
+progress_events,created_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Creation timestamp,Audit trail
+
+timer_sessions,id,TEXT,PRIMARY KEY,Timer session identifier,Timer management
+timer_sessions,user_id,TEXT,REFERENCES users(id),Foreign key to user,Session ownership
+timer_sessions,time_block_id,TEXT,REFERENCES time_blocks(id),Foreign key to time block,Block association
+timer_sessions,task_id,TEXT,REFERENCES tasks(id) NULL,Foreign key to task,Task association
+timer_sessions,start_time,INTEGER,NOT NULL,Timer start timestamp,Session start
+timer_sessions,end_time,INTEGER,NULL,Timer end timestamp,Session end
+timer_sessions,pause_duration,INTEGER,DEFAULT 0,Total pause time in seconds,Accuracy tracking
+timer_sessions,is_active,INTEGER,DEFAULT 0,Active status flag,Current state
+timer_sessions,auto_started,INTEGER,DEFAULT 0,Auto-start flag,Automation tracking
+timer_sessions,created_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Creation timestamp,Audit trail
+
+drag_operations,id,TEXT,PRIMARY KEY,Drag operation identifier,Drag & drop tracking
+drag_operations,user_id,TEXT,REFERENCES users(id),Foreign key to user,Operation ownership
+drag_operations,operation_type,TEXT,NOT NULL,Operation type (simple_move|expand_fill|bulk_move),Action classification
+drag_operations,source_block_id,TEXT,NULL,Source time block ID,Origin tracking
+drag_operations,target_block_ids,TEXT,JSON NOT NULL,Target block IDs array,Destination tracking
+drag_operations,task_id,TEXT,REFERENCES tasks(id) NULL,Moved task ID,Task tracking
+drag_operations,affected_blocks,TEXT,JSON DEFAULT '[]',Postponed/rescheduled blocks,Impact tracking
+drag_operations,was_expand_mode,INTEGER,DEFAULT 0,Expand mode flag,Mode tracking
+drag_operations,pinned_blocks_encountered,TEXT,JSON DEFAULT '[]',Pinned blocks that resisted,Conflict tracking
+drag_operations,success,INTEGER,DEFAULT 1,Operation success flag,Outcome tracking
+drag_operations,error_message,TEXT,NULL,Error message if failed,Error tracking
+drag_operations,executed_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Execution timestamp,Time tracking
+
+planning_sessions,id,TEXT,PRIMARY KEY,Planning session identifier,Planning mode tracking
+planning_sessions,user_id,TEXT,REFERENCES users(id),Foreign key to user,Session ownership
+planning_sessions,session_type,TEXT,NOT NULL,Session type (multi_select|planning_mode|bulk_move),Mode classification
+planning_sessions,selected_block_ids,TEXT,JSON NOT NULL,Selected block IDs array,Selection tracking
+planning_sessions,start_block_id,TEXT,NULL,Planning start block,Range start
+planning_sessions,end_block_id,TEXT,NULL,Planning end block,Range end
+planning_sessions,task_template,TEXT,JSON NULL,Task template for filling,Template storage
+planning_sessions,completed,INTEGER,DEFAULT 0,Completion status,Session state
+planning_sessions,started_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Session start timestamp,Time tracking
+planning_sessions,completed_at,INTEGER,NULL,Session completion timestamp,Time tracking
+
+voice_interactions,id,TEXT,PRIMARY KEY,Voice interaction identifier,Voice interface tracking
+voice_interactions,user_id,TEXT,REFERENCES users(id),Foreign key to user,Interaction ownership
+voice_interactions,interaction_type,TEXT,NOT NULL,Type (command|progress_check|tts),Classification
+voice_interactions,transcript,TEXT,NULL,Speech recognition result,Input tracking
+voice_interactions,processed_command,TEXT,NULL,Processed command text,Command parsing
+voice_interactions,intent,TEXT,NULL,Detected intent,AI processing
+voice_interactions,confidence,REAL,NULL,Recognition confidence (0-1),Quality measure
+voice_interactions,response_text,TEXT,NULL,TTS response text,Output tracking
+voice_interactions,task_created,TEXT,JSON NULL,Created task data,Task generation
+voice_interactions,success,INTEGER,DEFAULT 1,Interaction success flag,Outcome tracking
+voice_interactions,error_message,TEXT,NULL,Error message if failed,Error tracking
+voice_interactions,occurred_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Interaction timestamp,Time tracking
+
+calendar_events,id,TEXT,PRIMARY KEY,Calendar event identifier,Calendar integration
+calendar_events,user_id,TEXT,REFERENCES users(id),Foreign key to user,Event ownership
+calendar_events,external_id,TEXT,NULL,External calendar event ID,Integration
+calendar_events,title,TEXT,NOT NULL,Event title,Display name
+calendar_events,description,TEXT,NULL,Event description,Additional details
+calendar_events,start_time,INTEGER,NOT NULL,Event start timestamp,Time tracking
+calendar_events,end_time,INTEGER,NOT NULL,Event end timestamp,Time tracking
+calendar_events,all_day,INTEGER,DEFAULT 0,All-day event flag,Event type
+calendar_events,location,TEXT,NULL,Event location,Location tracking
+calendar_events,attendees,TEXT,JSON DEFAULT '[]',Attendees array,Participant tracking
+calendar_events,calendar_source,TEXT,NULL,Source calendar name,Source tracking
+calendar_events,color,TEXT,DEFAULT 'bg-blue-500',UI color class,Visual categorization
+calendar_events,status,TEXT,DEFAULT 'confirmed',Event status,State tracking
+calendar_events,sync_status,TEXT,DEFAULT 'synced',Sync status with external calendar,Integration status
+calendar_events,last_synced_at,INTEGER,NULL,Last sync timestamp,Sync tracking
+calendar_events,created_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Creation timestamp,Audit trail
+calendar_events,updated_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Last update timestamp,Audit trail
+
+calendar_integrations,id,TEXT,PRIMARY KEY,Integration identifier,Calendar service management
+calendar_integrations,user_id,TEXT,REFERENCES users(id),Foreign key to user,Integration ownership
+calendar_integrations,provider,TEXT,NOT NULL,Provider (google|outlook|apple|caldav),Service type
+calendar_integrations,account_name,TEXT,NOT NULL,Account identifier,Account tracking
+calendar_integrations,access_token,TEXT,NULL,Encrypted access token,Authentication
+calendar_integrations,refresh_token,TEXT,NULL,Encrypted refresh token,Authentication
+calendar_integrations,token_expires_at,INTEGER,NULL,Token expiration timestamp,Token management
+calendar_integrations,calendar_list,TEXT,JSON DEFAULT '[]',Available calendars,Calendar tracking
+calendar_integrations,sync_enabled,INTEGER,DEFAULT 1,Sync enabled flag,Integration control
+calendar_integrations,last_sync_at,INTEGER,NULL,Last sync timestamp,Sync tracking
+calendar_integrations,sync_errors,TEXT,JSON DEFAULT '[]',Recent sync errors,Error tracking
+calendar_integrations,created_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Creation timestamp,Audit trail
+calendar_integrations,updated_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Last update timestamp,Audit trail
+
+notion_integrations,id,TEXT,PRIMARY KEY,Integration identifier,Notion service management
+notion_integrations,user_id,TEXT,REFERENCES users(id),Foreign key to user,Integration ownership
+notion_integrations,integration_type,TEXT,DEFAULT 'api',Integration type (api|mcp),Service type
+notion_integrations,access_token,TEXT,NULL,Encrypted Notion token,Authentication
+notion_integrations,workspace_id,TEXT,NULL,Notion workspace ID,Workspace tracking
+notion_integrations,workspace_name,TEXT,NULL,Notion workspace name,Display name
+notion_integrations,bot_id,TEXT,NULL,Notion bot ID,Bot identification
+notion_integrations,available_databases,TEXT,JSON DEFAULT '[]',Available databases,Database tracking
+notion_integrations,sync_enabled,INTEGER,DEFAULT 1,Sync enabled flag,Integration control
+notion_integrations,last_sync_at,INTEGER,NULL,Last sync timestamp,Sync tracking
+notion_integrations,sync_errors,TEXT,JSON DEFAULT '[]',Recent sync errors,Error tracking
+notion_integrations,created_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Creation timestamp,Audit trail
+notion_integrations,updated_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Last update timestamp,Audit trail
+
+notion_databases,id,TEXT,PRIMARY KEY,Database identifier,Notion database management
+notion_databases,user_id,TEXT,REFERENCES users(id),Foreign key to user,Database ownership
+notion_databases,integration_id,TEXT,REFERENCES notion_integrations(id),Foreign key to integration,Integration association
+notion_databases,notion_database_id,TEXT,UNIQUE NOT NULL,Notion database ID,External reference
+notion_databases,name,TEXT,NOT NULL,Database name,Display name
+notion_databases,description,TEXT,NULL,Database description,Additional details
+notion_databases,icon,TEXT,NULL,Database icon,Visual representation
+notion_databases,cover,TEXT,NULL,Database cover URL,Visual representation
+notion_databases,properties,TEXT,JSON NOT NULL,Database properties schema,Schema tracking
+notion_databases,sync_enabled,INTEGER,DEFAULT 1,Sync enabled flag,Sync control
+notion_databases,task_title_property,TEXT,NULL,Property used for task title,Mapping configuration
+notion_databases,task_status_property,TEXT,NULL,Property used for task status,Mapping configuration
+notion_databases,task_priority_property,TEXT,NULL,Property used for task priority,Mapping configuration
+notion_databases,last_synced_at,INTEGER,NULL,Last sync timestamp,Sync tracking
+notion_databases,created_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Creation timestamp,Audit trail
+notion_databases,updated_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Last update timestamp,Audit trail
+
+notion_pages,id,TEXT,PRIMARY KEY,Page identifier,Notion page management
+notion_pages,user_id,TEXT,REFERENCES users(id),Foreign key to user,Page ownership
+notion_pages,database_id,TEXT,REFERENCES notion_databases(id),Foreign key to database,Database association
+notion_pages,notion_page_id,TEXT,UNIQUE NOT NULL,Notion page ID,External reference
+notion_pages,task_id,TEXT,REFERENCES tasks(id) NULL,Linked local task ID,Task association
+notion_pages,title,TEXT,NOT NULL,Page title,Display name
+notion_pages,status,TEXT,NULL,Page status,State tracking
+notion_pages,priority,TEXT,NULL,Page priority,Priority tracking
+notion_pages,due_date,TEXT,NULL,Due date (YYYY-MM-DD),Deadline tracking
+notion_pages,tags,TEXT,JSON DEFAULT '[]',Page tags array,Categorization
+notion_pages,properties,TEXT,JSON NOT NULL,Page properties data,Property storage
+notion_pages,url,TEXT,NULL,Notion page URL,External link
+notion_pages,created_time,TEXT,NULL,Notion creation time,Original timestamp
+notion_pages,last_edited_time,TEXT,NULL,Notion last edit time,Modification tracking
+notion_pages,sync_status,TEXT,DEFAULT 'synced',Sync status,Integration status
+notion_pages,last_synced_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Last sync timestamp,Sync tracking
+notion_pages,created_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Creation timestamp,Audit trail
+notion_pages,updated_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Last update timestamp,Audit trail
+
+ui_preferences,id,TEXT,PRIMARY KEY,Preference identifier,UI settings management
+ui_preferences,user_id,TEXT,REFERENCES users(id),Foreign key to user,Preference ownership
+ui_preferences,preference_key,TEXT,NOT NULL,Preference key,Setting identification
+ui_preferences,preference_value,TEXT,NOT NULL,Preference value (JSON),Setting storage
+ui_preferences,preference_type,TEXT,DEFAULT 'user',Preference scope (user|session|global),Scope classification
+ui_preferences,created_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Creation timestamp,Audit trail
+ui_preferences,updated_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Last update timestamp,Audit trail
+
+analytics_events,id,TEXT,PRIMARY KEY,Event identifier,Analytics tracking
+analytics_events,user_id,TEXT,REFERENCES users(id),Foreign key to user,Event ownership
+analytics_events,event_category,TEXT,NOT NULL,Event category,Classification
+analytics_events,event_action,TEXT,NOT NULL,Event action,Action tracking
+analytics_events,event_label,TEXT,NULL,Event label,Additional context
+analytics_events,event_value,INTEGER,NULL,Numeric event value,Metric tracking
+analytics_events,session_id,TEXT,NULL,Session identifier,Session grouping
+analytics_events,page_path,TEXT,NULL,Page path,Navigation tracking
+analytics_events,user_agent,TEXT,NULL,User agent string,Client tracking
+analytics_events,ip_address,TEXT,NULL,IP address (hashed),Location tracking
+analytics_events,properties,TEXT,JSON DEFAULT '{}',Additional event properties,Flexible storage
+analytics_events,occurred_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Event timestamp,Time tracking
+
+planning_logs,id,TEXT,PRIMARY KEY,Log identifier,Planning session logging
+planning_logs,user_id,TEXT,REFERENCES users(id),Foreign key to user,Log ownership
+planning_logs,session_id,TEXT,REFERENCES sessions(id),Foreign key to session,Session association
+planning_logs,planning_type,TEXT,NOT NULL,Type (daily|weekly|goal_setting|review),Planning classification
+planning_logs,objectives,TEXT,JSON DEFAULT '[]',Planning objectives array,Goal tracking
+planning_logs,outcomes,TEXT,JSON DEFAULT '[]',Planning outcomes array,Result tracking
+planning_logs,time_allocated_minutes,INTEGER,NULL,Time allocated for planning,Duration tracking
+planning_logs,effectiveness_rating,INTEGER,NULL,User effectiveness rating (1-10),Quality measure
+planning_logs,notes,TEXT,NULL,Planning session notes,Free text
+planning_logs,metadata,TEXT,JSON DEFAULT '{}',Additional planning data,Flexible storage
+planning_logs,started_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Planning start timestamp,Time tracking
+planning_logs,completed_at,INTEGER,NULL,Planning completion timestamp,Duration calculation
+
+tracking_logs,id,TEXT,PRIMARY KEY,Log identifier,Time tracking logging
+tracking_logs,user_id,TEXT,REFERENCES users(id),Foreign key to user,Log ownership
+tracking_logs,session_id,TEXT,REFERENCES sessions(id),Foreign key to session,Session association
+tracking_logs,time_block_id,TEXT,REFERENCES time_blocks(id),Foreign key to time block,Block association
+tracking_logs,task_id,TEXT,REFERENCES tasks(id) NULL,Foreign key to task,Task association
+tracking_logs,tracking_event,TEXT,NOT NULL,Event (block_start|block_complete|task_switch|interruption),Event classification
+tracking_logs,duration_seconds,INTEGER,NULL,Event duration in seconds,Time measurement
+tracking_logs,productivity_rating,INTEGER,NULL,User productivity rating (1-10),Quality measure
+tracking_logs,focus_level,INTEGER,NULL,User focus level (1-10),Attention measure
+tracking_logs,interruption_count,INTEGER,DEFAULT 0,Number of interruptions,Distraction tracking
+tracking_logs,interruption_sources,TEXT,JSON DEFAULT '[]',Interruption sources array,Distraction analysis
+tracking_logs,mood_before,INTEGER,NULL,Mood before block (1-10),Emotional state
+tracking_logs,mood_after,INTEGER,NULL,Mood after block (1-10),Emotional state
+tracking_logs,energy_before,INTEGER,NULL,Energy before block (1-10),Energy tracking
+tracking_logs,energy_after,INTEGER,NULL,Energy after block (1-10),Energy tracking
+tracking_logs,notes,TEXT,NULL,Free text notes,Additional context
+tracking_logs,metadata,TEXT,JSON DEFAULT '{}',Additional tracking data,Flexible storage
+tracking_logs,occurred_at,INTEGER,DEFAULT (strftime('%s','now')*1000),Event timestamp,Time tracking
