@@ -75,29 +75,98 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
   }, [doneMap])
 
   // Confetti celebration function
-  const celebrateTaskCompletion = useCallback((element?: Element | null) => {
+  const celebrateTaskCompletion = useCallback((element?: Element | null, isGoalCompletion: boolean = false) => {
     if (typeof window === 'undefined') return
     
-    // Get the position of the checkbox/task element for targeted confetti
-    let rect = { left: window.innerWidth / 2, top: window.innerHeight / 2, width: 0, height: 0 }
-    if (element) {
-      rect = element.getBoundingClientRect()
+    // Play applause sound
+    try {
+      const audio = new Audio('/applause.mp3')
+      audio.volume = 0.3
+      audio.play().catch(() => {
+        // Fallback to using Web Audio API to generate a simple celebration sound
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+        const oscillator = audioContext.createOscillator()
+        const gainNode = audioContext.createGain()
+        
+        oscillator.connect(gainNode)
+        gainNode.connect(audioContext.destination)
+        
+        oscillator.frequency.setValueAtTime(523, audioContext.currentTime) // C5
+        oscillator.frequency.setValueAtTime(659, audioContext.currentTime + 0.1) // E5
+        oscillator.frequency.setValueAtTime(784, audioContext.currentTime + 0.2) // G5
+        
+        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime)
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5)
+        
+        oscillator.start(audioContext.currentTime)
+        oscillator.stop(audioContext.currentTime + 0.5)
+      })
+    } catch (e) {
+      console.log('Audio not supported')
     }
     
-    const x = (rect.left + rect.width / 2) / window.innerWidth
-    const y = (rect.top + rect.height / 2) / window.innerHeight
+    if (isGoalCompletion) {
+      // Two-sided dramatic confetti for goal completion
+      const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316']
+      
+      // Left side confetti
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { x: 0.2, y: 0.6 },
+        colors,
+        scalar: 1.2,
+        gravity: 0.8,
+        drift: 0.2,
+        ticks: 200
+      })
+      
+      // Right side confetti
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { x: 0.8, y: 0.6 },
+        colors,
+        scalar: 1.2,
+        gravity: 0.8,
+        drift: -0.2,
+        ticks: 200
+      })
+      
+      // Center burst for extra celebration
+      confetti({
+        particleCount: 50,
+        spread: 90,
+        origin: { x: 0.5, y: 0.4 },
+        colors,
+        scalar: 1.0,
+        gravity: 1.0,
+        drift: 0,
+        ticks: 150
+      })
+    } else {
+      // Regular single-point confetti for individual tasks
+      // Get the position of the checkbox/task element for targeted confetti
+      let rect = { left: window.innerWidth / 2, top: window.innerHeight / 2, width: 0, height: 0 }
+      if (element) {
+        rect = element.getBoundingClientRect()
+      }
+      
+      const x = (rect.left + rect.width / 2) / window.innerWidth
+      const y = (rect.top + rect.height / 2) / window.innerHeight
 
-    // Small burst confetti effect
-    confetti({
-      particleCount: 50,
-      spread: 60,
-      origin: { x, y },
-      colors: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
-      scalar: 0.8,
-      gravity: 1.2,
-      drift: 0,
-      ticks: 120
-    })
+      // Small burst confetti effect
+      confetti({
+        particleCount: 50,
+        spread: 60,
+        origin: { x, y },
+        colors: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
+        scalar: 0.8,
+        gravity: 1.2,
+        drift: 0,
+        ticks: 120
+      })
+    }
   }, [])
 
   const isChecked = useCallback((item: ItemRow) => Boolean(item.is_completed), [])
@@ -113,7 +182,7 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
       
       // Trigger confetti celebration when marking as complete
       if (checked) {
-        celebrateTaskCompletion(element)
+        celebrateTaskCompletion(element, false) // Individual task completion
       }
       
       // Update local state optimistically
@@ -366,7 +435,7 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
       
       // Trigger confetti celebration when marking goal as complete
       if (value) {
-        celebrateTaskCompletion(element)
+        celebrateTaskCompletion(element, true) // Goal completion with dramatic effect
       }
       
       // Reload the list to get fresh data
