@@ -865,7 +865,7 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
 
   return (
     <div className={`group rounded-md hover:bg-zinc-900/50 px-2 py-1 relative ${
-      isNextTask && !checked ? 'next-task-highlight' : ''
+      isNextTask && !checked && expanded && children ? 'next-task-highlight' : ''
     }`}>
       <div className="flex items-start gap-2">
         <button onClick={() => onExpand(item.id)} className="mt-1 text-zinc-400 hover:text-zinc-200">
