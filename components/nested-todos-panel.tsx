@@ -1,11 +1,12 @@
 "use client"
 
-import React, { useCallback, useEffect, useMemo, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Plus, Trash2, ChevronRight, ChevronDown, RefreshCw } from "lucide-react"
+import confetti from 'canvas-confetti'
 
 // Minimal breakdown item shape we use in the UI
 interface ItemRow {
@@ -73,8 +74,34 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     } catch {}
   }, [doneMap])
 
+  // Confetti celebration function
+  const celebrateTaskCompletion = useCallback((element?: Element | null) => {
+    if (typeof window === 'undefined') return
+    
+    // Get the position of the checkbox/task element for targeted confetti
+    let rect = { left: window.innerWidth / 2, top: window.innerHeight / 2, width: 0, height: 0 }
+    if (element) {
+      rect = element.getBoundingClientRect()
+    }
+    
+    const x = (rect.left + rect.width / 2) / window.innerWidth
+    const y = (rect.top + rect.height / 2) / window.innerHeight
+
+    // Small burst confetti effect
+    confetti({
+      particleCount: 50,
+      spread: 60,
+      origin: { x, y },
+      colors: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
+      scalar: 0.8,
+      gravity: 1.2,
+      drift: 0,
+      ticks: 120
+    })
+  }, [])
+
   const isChecked = useCallback((item: ItemRow) => Boolean(item.is_completed), [])
-  const setChecked = useCallback(async (id: string, checked: boolean) => {
+  const setChecked = useCallback(async (id: string, checked: boolean, element?: Element | null) => {
     // Update database
     try {
       const res = await fetch('/api/local/breakdown', {
@@ -83,6 +110,11 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
         body: JSON.stringify({ items: [{ id, is_completed: checked }] })
       })
       if (!res.ok) throw new Error('Failed to update completion status')
+      
+      // Trigger confetti celebration when marking as complete
+      if (checked) {
+        celebrateTaskCompletion(element)
+      }
       
       // Update local state optimistically
       setTree(prev => {
@@ -97,7 +129,7 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     } catch (e) {
       console.error('Failed to update task completion:', e)
     }
-  }, [])
+  }, [celebrateTaskCompletion])
 
   // Load today's goals
   const loadGoals = useCallback(async () => {
@@ -320,7 +352,7 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     return { all, none, some }
   }
 
-  const toggleGoal = async (goalKey: GoalKey, value: boolean) => {
+  const toggleGoal = async (goalKey: GoalKey, value: boolean, element?: Element | null) => {
     const items = tree[keyFor(goalKey, null)] || []
     try {
       // Update all items in this goal
@@ -331,6 +363,11 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
         body: JSON.stringify({ items: updates })
       })
       if (!res.ok) throw new Error('Failed to update goal completion status')
+      
+      // Trigger confetti celebration when marking goal as complete
+      if (value) {
+        celebrateTaskCompletion(element)
+      }
       
       // Reload the list to get fresh data
       await loadList(goalKey, null)
@@ -395,7 +432,10 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
                   <div className="flex items-center gap-2 min-w-0">
                     <Checkbox
                       checked={goalChecked as any}
-                      onCheckedChange={(v) => toggleGoal(goalKey, Boolean(v))}
+                      onCheckedChange={(v) => {
+                        const checkbox = document.activeElement as Element
+                        toggleGoal(goalKey, Boolean(v), checkbox)
+                      }}
                       className="border-zinc-400 bg-transparent rounded-md data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=indeterminate]:bg-zinc-700 data-[state=indeterminate]:border-zinc-400"
                     />
                     <div className="font-medium text-zinc-100 truncate" title={labelForIndex(index)}>{labelForIndex(index)}</div>
@@ -481,7 +521,7 @@ function List({
   updateTitle: (id: string, title: string) => Promise<void>
   deleteItem: (id: string) => Promise<void>
   isChecked: (item: ItemRow) => boolean
-  setChecked: (id: string, v: boolean) => Promise<void>
+  setChecked: (id: string, v: boolean, element?: Element | null) => Promise<void>
   pendingEdits: Record<string, string>
   setPendingEdits: React.Dispatch<React.SetStateAction<Record<string, string>>>
 }) {
@@ -600,7 +640,7 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
   onRename: (id: string, title: string) => Promise<void>
   onDelete: (id: string) => Promise<void>
   isChecked: (item: ItemRow) => boolean
-  setChecked: (id: string, v: boolean) => Promise<void>
+  setChecked: (id: string, v: boolean, element?: Element | null) => Promise<void>
   pendingEdits: Record<string, string>
   setPendingEdits: React.Dispatch<React.SetStateAction<Record<string, string>>>
   setTree: React.Dispatch<React.SetStateAction<Record<string, ItemRow[]>>>
@@ -671,7 +711,10 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
         </button>
         <Checkbox
           checked={checked as any}
-          onCheckedChange={(v) => setChecked(item.id, Boolean(v))}
+          onCheckedChange={(v) => {
+            const checkbox = document.activeElement as Element
+            setChecked(item.id, Boolean(v), checkbox)
+          }}
           className="mt-1 border-zinc-400 bg-transparent rounded-md data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
         />
         <div className="flex-1 min-w-0">
