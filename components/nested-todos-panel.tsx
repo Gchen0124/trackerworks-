@@ -544,45 +544,50 @@ function List({
       {!isLoading && (!items || items.length === 0) && (
         <div className="text-xs text-zinc-500 italic py-2">No items yet.</div>
       )}
-      {!isLoading && (items || []).map((it) => (
-        <TreeNode
-          key={it.id}
-          item={it}
-          expanded={!!expanded[it.id]}
-          onExpand={(id) => {
-            setExpanded(e => ({ ...e, [id]: !e[id] }))
-            const willOpen = !expanded[it.id]
-            if (willOpen) loadList(goalKey, it.id)
-          }}
-          onRename={updateTitle}
-          onDelete={onDeleteHere}
-          isChecked={isChecked}
-          setChecked={setChecked}
-          pendingEdits={pendingEdits}
-          setPendingEdits={setPendingEdits}
-          setTree={setTree}
-        >
-          {expanded[it.id] && (
-            <List
-              goalKey={goalKey}
-              parentId={it.id}
-              keyFor={keyFor}
-              tree={tree}
-              setTree={setTree}
-              loading={loading}
-              expanded={expanded}
-              setExpanded={setExpanded}
-              loadList={loadList}
-              saveChildren={saveChildren}
-              updateTitle={updateTitle}
-              deleteItem={deleteItem}
-              isChecked={isChecked}
-              setChecked={setChecked}
-              pendingEdits={pendingEdits}
-              setPendingEdits={setPendingEdits}
-            />
+      {!isLoading && (items || []).map((it, index) => (
+        <div key={it.id} className="relative">
+          {/* Vertical connector between tasks at same level when not expanded */}
+          {index > 0 && !expanded[it.id] && (
+            <div className="absolute -top-6 left-20 w-px h-8 bg-zinc-500"></div>
           )}
-        </TreeNode>
+          <TreeNode
+            item={it}
+            expanded={!!expanded[it.id]}
+            onExpand={(id) => {
+              setExpanded(e => ({ ...e, [id]: !e[id] }))
+              const willOpen = !expanded[it.id]
+              if (willOpen) loadList(goalKey, it.id)
+            }}
+            onRename={updateTitle}
+            onDelete={onDeleteHere}
+            isChecked={isChecked}
+            setChecked={setChecked}
+            pendingEdits={pendingEdits}
+            setPendingEdits={setPendingEdits}
+            setTree={setTree}
+          >
+            {expanded[it.id] && (
+              <List
+                goalKey={goalKey}
+                parentId={it.id}
+                keyFor={keyFor}
+                tree={tree}
+                setTree={setTree}
+                loading={loading}
+                expanded={expanded}
+                setExpanded={setExpanded}
+                loadList={loadList}
+                saveChildren={saveChildren}
+                updateTitle={updateTitle}
+                deleteItem={deleteItem}
+                isChecked={isChecked}
+                setChecked={setChecked}
+                pendingEdits={pendingEdits}
+                setPendingEdits={setPendingEdits}
+              />
+            )}
+          </TreeNode>
+        </div>
       ))}
     </div>
   )
@@ -659,7 +664,7 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
   const checked = isChecked(item)
 
   return (
-    <div className="group rounded-md hover:bg-zinc-900/50 px-2 py-1">
+    <div className="group rounded-md hover:bg-zinc-900/50 px-2 py-1 relative">
       <div className="flex items-start gap-2">
         <button onClick={() => onExpand(item.id)} className="mt-1 text-zinc-400 hover:text-zinc-200">
           {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
@@ -680,7 +685,7 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
                 e.currentTarget.blur() // This will trigger the commit
               }
             }}
-            className="h-8 bg-zinc-900/60 border-zinc-800 text-zinc-100 placeholder:text-zinc-500"
+            className="h-6 bg-zinc-900/60 border-zinc-800 text-zinc-100 placeholder:text-zinc-500 text-sm"
             placeholder="Untitled"
           />
         </div>
@@ -691,7 +696,7 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
         </div>
       </div>
       {expanded && (
-        <div className="ml-6 mt-1">
+        <div className="ml-6 mt-0 relative">
           {children}
         </div>
       )}
