@@ -80,26 +80,73 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     
     // Play applause sound
     try {
-      const audio = new Audio('/applause.mp3')
-      audio.volume = 0.3
+      const soundFile = isGoalCompletion ? '/goal-celebration.mp3' : '/applause.mp3'
+      const audio = new Audio(soundFile)
+      audio.volume = isGoalCompletion ? 0.5 : 0.3
       audio.play().catch(() => {
-        // Fallback to using Web Audio API to generate a simple celebration sound
+        // Fallback to using Web Audio API to generate celebration sound
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
-        const oscillator = audioContext.createOscillator()
-        const gainNode = audioContext.createGain()
         
-        oscillator.connect(gainNode)
-        gainNode.connect(audioContext.destination)
-        
-        oscillator.frequency.setValueAtTime(523, audioContext.currentTime) // C5
-        oscillator.frequency.setValueAtTime(659, audioContext.currentTime + 0.1) // E5
-        oscillator.frequency.setValueAtTime(784, audioContext.currentTime + 0.2) // G5
-        
-        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime)
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5)
-        
-        oscillator.start(audioContext.currentTime)
-        oscillator.stop(audioContext.currentTime + 0.5)
+        if (isGoalCompletion) {
+          // Bigger, more delightful sound for goal completion
+          const playNote = (frequency: number, startTime: number, duration: number, volume: number = 0.15) => {
+            const oscillator = audioContext.createOscillator()
+            const gainNode = audioContext.createGain()
+            
+            oscillator.connect(gainNode)
+            gainNode.connect(audioContext.destination)
+            
+            oscillator.frequency.setValueAtTime(frequency, startTime)
+            oscillator.type = 'sine'
+            
+            gainNode.gain.setValueAtTime(0, startTime)
+            gainNode.gain.linearRampToValueAtTime(volume, startTime + 0.01)
+            gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + duration)
+            
+            oscillator.start(startTime)
+            oscillator.stop(startTime + duration)
+          }
+          
+          const currentTime = audioContext.currentTime
+          
+          // Victory fanfare: C-E-G-C (major chord) ascending
+          playNote(523, currentTime, 0.3, 0.2) // C5
+          playNote(659, currentTime + 0.1, 0.3, 0.18) // E5
+          playNote(784, currentTime + 0.2, 0.3, 0.16) // G5
+          playNote(1047, currentTime + 0.3, 0.5, 0.2) // C6 (octave)
+          
+          // Add harmony
+          playNote(330, currentTime + 0.1, 0.4, 0.1) // E4
+          playNote(392, currentTime + 0.2, 0.4, 0.1) // G4
+          playNote(523, currentTime + 0.3, 0.6, 0.12) // C5
+          
+          // Triumphant ending chord
+          setTimeout(() => {
+            const endTime = audioContext.currentTime
+            playNote(523, endTime, 0.8, 0.15) // C5
+            playNote(659, endTime, 0.8, 0.15) // E5
+            playNote(784, endTime, 0.8, 0.15) // G5
+            playNote(1047, endTime, 0.8, 0.18) // C6
+          }, 600)
+          
+        } else {
+          // Simple celebration sound for individual tasks
+          const oscillator = audioContext.createOscillator()
+          const gainNode = audioContext.createGain()
+          
+          oscillator.connect(gainNode)
+          gainNode.connect(audioContext.destination)
+          
+          oscillator.frequency.setValueAtTime(523, audioContext.currentTime) // C5
+          oscillator.frequency.setValueAtTime(659, audioContext.currentTime + 0.1) // E5
+          oscillator.frequency.setValueAtTime(784, audioContext.currentTime + 0.2) // G5
+          
+          gainNode.gain.setValueAtTime(0.1, audioContext.currentTime)
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5)
+          
+          oscillator.start(audioContext.currentTime)
+          oscillator.stop(audioContext.currentTime + 0.5)
+        }
       })
     } catch (e) {
       console.log('Audio not supported')
