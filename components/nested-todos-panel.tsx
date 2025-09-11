@@ -12,6 +12,9 @@ interface ItemRow {
   id: string
   title: string
   order_index?: number
+  is_completed?: boolean
+  depth_level?: number
+  priority?: number
 }
 
 type GoalKey = "goal1" | "goal2" | "goal3"
@@ -29,6 +32,8 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
   const [refreshKey, setRefreshKey] = useState(0)
   const [notes, setNotes] = useState<string>("")
   const [notesSaving, setNotesSaving] = useState(false)
+  // Track pending edits to prevent data loss
+  const [pendingEdits, setPendingEdits] = useState<Record<string, string>>({}) // id -> title
 
   // Local done state persisted in localStorage
   const STORAGE_KEY = "nestedTodosDone:v1"
@@ -62,9 +67,30 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     } catch {}
   }, [doneMap])
 
-  const isChecked = useCallback((id: string) => !!doneMap[id], [doneMap])
-  const setChecked = useCallback((id: string, v: boolean) => {
-    setDoneMap(prev => ({ ...prev, [id]: v }))
+  const isChecked = useCallback((item: ItemRow) => Boolean(item.is_completed), [])
+  const setChecked = useCallback(async (id: string, checked: boolean) => {
+    // Update database
+    try {
+      const res = await fetch('/api/local/breakdown', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ id, is_completed: checked }] })
+      })
+      if (!res.ok) throw new Error('Failed to update completion status')
+      
+      // Update local state optimistically
+      setTree(prev => {
+        const updated = { ...prev }
+        Object.keys(updated).forEach(key => {
+          updated[key] = updated[key].map(item => 
+            item.id === id ? { ...item, is_completed: checked } : item
+          )
+        })
+        return updated
+      })
+    } catch (e) {
+      console.error('Failed to update task completion:', e)
+    }
   }, [])
 
   // Load today's goals
@@ -166,7 +192,40 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     }
   }, [])
 
-  // Keep goal labels in sync with the top DailyGoals panel via event
+  // Save pending edits when clicking away from the panel
+  const savePendingEdits = useCallback(async () => {
+    const pendingUpdates = Object.entries(pendingEdits).map(([id, title]) => ({ id, title }))
+    if (pendingUpdates.length > 0) {
+      try {
+        await fetch('/api/local/breakdown', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: pendingUpdates })
+        })
+        // Update tree state immediately
+        setTree(prev => {
+          const updated = { ...prev }
+          Object.keys(updated).forEach(key => {
+            updated[key] = updated[key].map(item => {
+              const pendingTitle = pendingEdits[item.id]
+              return pendingTitle ? { ...item, title: pendingTitle } : item
+            })
+          })
+          return updated
+        })
+        setPendingEdits({}) // Clear pending edits after saving
+      } catch (e) {
+        console.error('Failed to save pending edits:', e)
+      }
+    }
+  }, [pendingEdits, setTree])
+
+  // Save pending edits when panel is closed
+  useEffect(() => {
+    if (!open && Object.keys(pendingEdits).length > 0) {
+      savePendingEdits()
+    }
+  }, [open, pendingEdits, savePendingEdits])
   useEffect(() => {
     const onDailyGoalsUpdated = (e: Event) => {
       try {
@@ -198,7 +257,14 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
       const res = await fetch(`/api/local/breakdown?${qs.toString()}`)
       if (!res.ok) throw new Error("load_list_failed")
       const data = await res.json()
-      const rows: ItemRow[] = (data?.items || []).map((r: any, i: number) => ({ id: r.id, title: r.title || "", order_index: r.order_index ?? i }))
+      const rows: ItemRow[] = (data?.items || []).map((r: any, i: number) => ({ 
+        id: r.id, 
+        title: r.title || "", 
+        order_index: r.order_index ?? i,
+        is_completed: Boolean(r.is_completed),
+        depth_level: r.depth_level ?? 0,
+        priority: r.priority ?? 1
+      }))
       setTree(prev => ({ ...prev, [k]: rows }))
     } catch (e) {
       // keep previous
@@ -239,7 +305,7 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
   const aggregateForKey = (goalKey: GoalKey) => {
     const items = tree[keyFor(goalKey, null)] || []
     if (items.length === 0) return { all: false, none: true, some: false }
-    const cnt = items.reduce((acc, it) => acc + (isChecked(it.id) ? 1 : 0), 0)
+    const cnt = items.reduce((acc, it) => acc + (it.is_completed ? 1 : 0), 0)
     const all = cnt === items.length
     const none = cnt === 0
     const some = !all && !none
@@ -248,9 +314,21 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
 
   const toggleGoal = async (goalKey: GoalKey, value: boolean) => {
     const items = tree[keyFor(goalKey, null)] || []
-    const next: Record<string, boolean> = {}
-    for (const it of items) next[it.id] = value
-    setDoneMap(prev => ({ ...prev, ...next }))
+    try {
+      // Update all items in this goal
+      const updates = items.map(item => ({ id: item.id, is_completed: value }))
+      const res = await fetch('/api/local/breakdown', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: updates })
+      })
+      if (!res.ok) throw new Error('Failed to update goal completion status')
+      
+      // Reload the list to get fresh data
+      await loadList(goalKey, null)
+    } catch (e) {
+      console.error('Failed to toggle goal completion:', e)
+    }
   }
 
   return (
@@ -318,6 +396,7 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
                     parentId={null}
                     keyFor={keyFor}
                     tree={tree}
+                    setTree={setTree}
                     loading={loading}
                     expanded={expanded}
                     setExpanded={setExpanded}
@@ -327,6 +406,8 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
                     deleteItem={deleteItem}
                     isChecked={isChecked}
                     setChecked={setChecked}
+                    pendingEdits={pendingEdits}
+                    setPendingEdits={setPendingEdits}
                   />
                 </div>
               </div>
@@ -343,6 +424,7 @@ function List({
   parentId,
   keyFor,
   tree,
+  setTree,
   loading,
   expanded,
   setExpanded,
@@ -352,11 +434,14 @@ function List({
   deleteItem,
   isChecked,
   setChecked,
+  pendingEdits,
+  setPendingEdits,
 }: {
   goalKey: GoalKey
   parentId: string | null
   keyFor: (goalKey: GoalKey, parentId: string | null) => string
   tree: Record<string, ItemRow[]>
+  setTree: React.Dispatch<React.SetStateAction<Record<string, ItemRow[]>>>
   loading: Record<string, boolean>
   expanded: Record<string, boolean>
   setExpanded: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
@@ -364,8 +449,10 @@ function List({
   saveChildren: (goalKey: GoalKey, parentId: string | null, items: Array<{ id?: string; title: string; order_index?: number }>) => Promise<void>
   updateTitle: (id: string, title: string) => Promise<void>
   deleteItem: (id: string) => Promise<void>
-  isChecked: (id: string) => boolean
-  setChecked: (id: string, v: boolean) => void
+  isChecked: (item: ItemRow) => boolean
+  setChecked: (id: string, v: boolean) => Promise<void>
+  pendingEdits: Record<string, string>
+  setPendingEdits: React.Dispatch<React.SetStateAction<Record<string, string>>>
 }) {
   const listKey = keyFor(goalKey, parentId)
   const items = tree[listKey]
@@ -377,9 +464,34 @@ function List({
   }, [listKey])
 
   const onAdd = async () => {
-    const curr = items || []
+    // Save any pending edits first
+    const pendingUpdates = Object.entries(pendingEdits).map(([id, title]) => ({ id, title }))
+    if (pendingUpdates.length > 0) {
+      try {
+        await fetch('/api/local/breakdown', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: pendingUpdates })
+        })
+        setPendingEdits({}) // Clear pending edits after saving
+      } catch (e) {
+        console.error('Failed to save pending edits:', e)
+      }
+    }
+    
+    // Get fresh data from the tree (includes both saved and pending edits)
+    const currentItems = tree[keyFor(goalKey, parentId)] || []
+    // Merge in any pending edits to get the most current state
+    const itemsWithPendingEdits = currentItems.map(item => ({
+      ...item,
+      title: pendingEdits[item.id] || item.title
+    }))
+    
     try {
-      await saveChildren(goalKey, parentId, [...curr, { title: parentId ? "New subtask" : "New task", order_index: curr.length }])
+      await saveChildren(goalKey, parentId, [...itemsWithPendingEdits, { 
+        title: parentId ? "New subtask" : "New task", 
+        order_index: itemsWithPendingEdits.length 
+      }])
     } finally {
       loadList(goalKey, parentId)
     }
@@ -415,6 +527,9 @@ function List({
           onDelete={onDeleteHere}
           isChecked={isChecked}
           setChecked={setChecked}
+          pendingEdits={pendingEdits}
+          setPendingEdits={setPendingEdits}
+          setTree={setTree}
         >
           {expanded[it.id] && (
             <List
@@ -422,6 +537,7 @@ function List({
               parentId={it.id}
               keyFor={keyFor}
               tree={tree}
+              setTree={setTree}
               loading={loading}
               expanded={expanded}
               setExpanded={setExpanded}
@@ -431,6 +547,8 @@ function List({
               deleteItem={deleteItem}
               isChecked={isChecked}
               setChecked={setChecked}
+              pendingEdits={pendingEdits}
+              setPendingEdits={setPendingEdits}
             />
           )}
         </TreeNode>
@@ -439,33 +557,75 @@ function List({
   )
 }
 
-function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, setChecked, children }: {
+function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, setChecked, pendingEdits, setPendingEdits, setTree, children }: {
   item: ItemRow
   expanded: boolean
   onExpand: (id: string) => void
   onRename: (id: string, title: string) => Promise<void>
   onDelete: (id: string) => Promise<void>
-  isChecked: (id: string) => boolean
-  setChecked: (id: string, v: boolean) => void
+  isChecked: (item: ItemRow) => boolean
+  setChecked: (id: string, v: boolean) => Promise<void>
+  pendingEdits: Record<string, string>
+  setPendingEdits: React.Dispatch<React.SetStateAction<Record<string, string>>>
+  setTree: React.Dispatch<React.SetStateAction<Record<string, ItemRow[]>>>
   children?: React.ReactNode
 }) {
-  const [title, setTitle] = useState(item.title)
+  // Use pending edit if available, otherwise use item title
+  const [title, setTitle] = useState(pendingEdits[item.id] || item.title)
   const [inputSaving, setInputSaving] = useState(false)
 
-  useEffect(() => setTitle(item.title), [item.title])
+  // Update title when item changes, but only if no pending edit exists
+  useEffect(() => {
+    if (!pendingEdits[item.id]) {
+      setTitle(item.title)
+    }
+  }, [item.title, pendingEdits, item.id])
 
   const commit = async () => {
     const next = title.trim()
-    if (next === item.title.trim()) return
+    if (next === item.title.trim()) {
+      // Remove from pending if it matches saved value
+      setPendingEdits(prev => {
+        const updated = { ...prev }
+        delete updated[item.id]
+        return updated
+      })
+      return
+    }
     try {
       setInputSaving(true)
       await onRename(item.id, next)
+      // Remove from pending edits after successful save
+      setPendingEdits(prev => {
+        const updated = { ...prev }
+        delete updated[item.id]
+        return updated
+      })
+      
+      // Update the tree state immediately to reflect the change
+      setTree(prev => {
+        const updated = { ...prev }
+        Object.keys(updated).forEach(key => {
+          updated[key] = updated[key].map(treeItem => 
+            treeItem.id === item.id ? { ...treeItem, title: next } : treeItem
+          )
+        })
+        return updated
+      })
+    } catch (e) {
+      console.error('Failed to save task title:', e)
     } finally {
       setInputSaving(false)
     }
   }
 
-  const checked = isChecked(item.id)
+  const handleTitleChange = (newTitle: string) => {
+    setTitle(newTitle)
+    // Track as pending edit
+    setPendingEdits(prev => ({ ...prev, [item.id]: newTitle }))
+  }
+
+  const checked = isChecked(item)
 
   return (
     <div className="group rounded-md hover:bg-zinc-900/50 px-2 py-1">
@@ -481,9 +641,14 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
         <div className="flex-1 min-w-0">
           <Input
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => handleTitleChange(e.target.value)}
             onBlur={commit}
-            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+            onKeyDown={(e) => { 
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                e.currentTarget.blur() // This will trigger the commit
+              }
+            }}
             className="h-8 bg-zinc-900/60 border-zinc-800 text-zinc-100 placeholder:text-zinc-500"
             placeholder="Untitled"
           />

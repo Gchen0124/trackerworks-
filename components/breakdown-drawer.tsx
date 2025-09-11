@@ -36,6 +36,7 @@ export default function BreakdownDrawer({ open, onOpenChange, parentId, goalId, 
   const [chatInput, setChatInput] = useState("")
   const [selectedCount, setSelectedCount] = useState<number>(0)
   const [selectedDetails, setSelectedDetails] = useState<Array<{ id: string; startTime?: string; endTime?: string }>>([])
+  const [autoSaveTimeoutId, setAutoSaveTimeoutId] = useState<NodeJS.Timeout | null>(null)
 
   const formatRange = (s?: string, e?: string) => {
     if (!s || !e) return ""
@@ -86,9 +87,24 @@ export default function BreakdownDrawer({ open, onOpenChange, parentId, goalId, 
         if (!cancelled) setSelectedCount(ids.length)
         if (!cancelled) setSelectedDetails(dets)
         // If there is no draft loaded and we have a selection, seed empty rows equal to selection count
+        // But preserve any user input that hasn't been saved yet
         if (!cancelled && ids.length > 0) {
           setItems(prev => {
-            if (prev.length > 0) return prev
+            // Don't overwrite existing items (whether loaded from DB or user-typed)
+            if (prev.length > 0) {
+              // If user has typed content, preserve it and extend to match selection count if needed
+              const hasUserContent = prev.some(item => item.title.trim() !== "")
+              if (hasUserContent || prev.length >= ids.length) {
+                return prev
+              }
+              // Extend existing items to match selection count
+              const needed = ids.length - prev.length
+              if (needed > 0) {
+                return [...prev, ...Array.from({ length: needed }).map((_, i) => ({ title: "", order_index: prev.length + i }))]
+              }
+              return prev
+            }
+            // Only create new empty items if there are no existing items at all
             return Array.from({ length: ids.length }).map((_, i) => ({ title: "", order_index: i }))
           })
         }
@@ -106,6 +122,41 @@ export default function BreakdownDrawer({ open, onOpenChange, parentId, goalId, 
       }
     }
   }, [open, query])
+
+  // Auto-save when items change (debounced)
+  useEffect(() => {
+    // Clear existing timeout
+    if (autoSaveTimeoutId) {
+      clearTimeout(autoSaveTimeoutId)
+    }
+
+    // Only auto-save if items have content and we're not currently loading
+    const hasContent = items.some(item => item.title.trim() !== "")
+    if (!loading && hasContent && (parentId || goalId)) {
+      const timeoutId = setTimeout(() => {
+        saveDraft().catch(() => {
+          // Silently fail auto-save, user can manually save
+        })
+      }, 2000) // Auto-save 2 seconds after user stops typing
+      
+      setAutoSaveTimeoutId(timeoutId)
+    }
+
+    return () => {
+      if (autoSaveTimeoutId) {
+        clearTimeout(autoSaveTimeoutId)
+      }
+    }
+  }, [items, loading, parentId, goalId])
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimeoutId) {
+        clearTimeout(autoSaveTimeoutId)
+      }
+    }
+  }, [])
 
   const loadItemsFromAI = (aiItems: Array<{ title: string; estimate_min?: number }>) => {
     let arr = (aiItems || []).map((it) => ({ title: it.title }))

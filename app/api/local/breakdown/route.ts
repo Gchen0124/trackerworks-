@@ -14,6 +14,17 @@ function ensureId() {
   try { return crypto.randomUUID() } catch { return Math.random().toString(36).slice(2) }
 }
 
+// Calculate depth level for a parent
+function calculateDepthLevel(parentId: string | null): number {
+  if (!parentId) return 0
+  try {
+    const parent = sqlite.prepare(`SELECT depth_level FROM breakdown_items WHERE id = ?`).get(parentId) as any
+    return parent ? (parent.depth_level + 1) : 1
+  } catch {
+    return 1
+  }
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const parentId = searchParams.get("parentId")
@@ -63,8 +74,13 @@ export async function POST(req: NextRequest) {
       if (goalId) { where += " AND goal_id = ?"; args.push(goalId) }
       sqlite.prepare(`DELETE FROM breakdown_items WHERE ${where}`).run(...args)
 
-      const insert = sqlite.prepare(`INSERT INTO breakdown_items (id, parent_id, scope_type, goal_id, title, estimate_min, order_index, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`)
+      const insert = sqlite.prepare(`INSERT INTO breakdown_items (
+        id, parent_id, scope_type, goal_id, title, estimate_min, order_index, 
+        depth_level, is_completed, priority, created_at, updated_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
       const ts = now()
+      const depthLevel = calculateDepthLevel(parentId)
+      
       payload.forEach((it, idx) => {
         const id = it.id || ensureId()
         insert.run(
@@ -75,6 +91,9 @@ export async function POST(req: NextRequest) {
           it.title?.toString() || '',
           typeof it.estimate_min === 'number' ? it.estimate_min : null,
           typeof it.order_index === 'number' ? it.order_index! : idx,
+          depthLevel,
+          0, // is_completed default false
+          1, // priority default low
           ts,
           ts,
         )
@@ -91,12 +110,25 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   try {
     const body = await req.json()
-    const items: Array<{ id: string, title?: string, estimate_min?: number, order_index?: number }> = body?.items || []
+    const items: Array<{ 
+      id: string, 
+      title?: string, 
+      estimate_min?: number, 
+      order_index?: number,
+      is_completed?: boolean,
+      priority?: number,
+      due_date?: string,
+      notes?: string
+    }> = body?.items || []
     if (!Array.isArray(items) || items.length === 0) return new Response(JSON.stringify({ error: 'No items' }), { status: 400 })
 
     const updTitle = sqlite.prepare(`UPDATE breakdown_items SET title = ?, updated_at = ? WHERE id = ?`)
     const updEst = sqlite.prepare(`UPDATE breakdown_items SET estimate_min = ?, updated_at = ? WHERE id = ?`)
     const updOrder = sqlite.prepare(`UPDATE breakdown_items SET order_index = ?, updated_at = ? WHERE id = ?`)
+    const updCompleted = sqlite.prepare(`UPDATE breakdown_items SET is_completed = ?, updated_at = ? WHERE id = ?`)
+    const updPriority = sqlite.prepare(`UPDATE breakdown_items SET priority = ?, updated_at = ? WHERE id = ?`)
+    const updDueDate = sqlite.prepare(`UPDATE breakdown_items SET due_date = ?, updated_at = ? WHERE id = ?`)
+    const updNotes = sqlite.prepare(`UPDATE breakdown_items SET notes = ?, updated_at = ? WHERE id = ?`)
 
     const ts = now()
     const tx = sqlite.transaction((arr: typeof items) => {
@@ -104,6 +136,10 @@ export async function PUT(req: NextRequest) {
         if (typeof it.title === 'string') updTitle.run(it.title, ts, it.id)
         if (typeof it.estimate_min === 'number') updEst.run(it.estimate_min, ts, it.id)
         if (typeof it.order_index === 'number') updOrder.run(it.order_index, ts, it.id)
+        if (typeof it.is_completed === 'boolean') updCompleted.run(it.is_completed ? 1 : 0, ts, it.id)
+        if (typeof it.priority === 'number') updPriority.run(it.priority, ts, it.id)
+        if (typeof it.due_date === 'string') updDueDate.run(it.due_date, ts, it.id)
+        if (typeof it.notes === 'string') updNotes.run(it.notes, ts, it.id)
       })
     })
 
