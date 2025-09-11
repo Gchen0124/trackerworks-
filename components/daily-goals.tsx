@@ -19,6 +19,7 @@ interface GoalsResponse {
   excitingGoal?: string
   eoyGoal?: string
   monthlyGoal?: string
+  daysAgo?: number | null // How many days ago these goals were from
 }
 
 function todayKey(dateStr?: string) {
@@ -41,6 +42,8 @@ export default function DailyGoals() {
   const [excitingGoal, setExcitingGoal] = useState("")
   const [eoyGoal, setEoyGoal] = useState("")
   const [monthlyGoal, setMonthlyGoal] = useState("")
+  // Goal retrieval tracking
+  const [goalsDaysAgo, setGoalsDaysAgo] = useState<number | null>(null)
   // Breakdown drawer state
   const [bdOpen, setBdOpen] = useState(false)
   const [bdGoalId, setBdGoalId] = useState<string | undefined>(undefined)
@@ -81,30 +84,33 @@ export default function DailyGoals() {
       if (!res.ok) throw new Error("Failed to load goals")
       const data: GoalsResponse = await res.json()
 
-      // Check if today's goals are empty and if so, try to load yesterday's goals
+      // Check if today's goals are empty and if so, try to load recent goals
       const hasAnyGoals = data.weeklyGoal || data.goals?.some(g => g) || data.excitingGoal || data.eoyGoal || data.monthlyGoal
       
       let finalData = data
+      let daysAgo: number | null = null
+      
       if (!hasAnyGoals) {
         try {
-          // Try to load yesterday's goals if they exist and are not completed
-          const yesterdayRes = await fetch(`/api/local/goals/yesterday?date=${dateStr}`)
-          if (yesterdayRes.ok) {
-            const yesterdayData = await yesterdayRes.json()
-            const hasYesterdayGoals = yesterdayData.weeklyGoal || yesterdayData.goals?.some(g => g) || 
-                                      yesterdayData.excitingGoal || yesterdayData.eoyGoal || yesterdayData.monthlyGoal
+          // Try to load most recent goals from the past week
+          const recentRes = await fetch(`/api/local/goals/recent?date=${dateStr}`)
+          if (recentRes.ok) {
+            const recentData = await recentRes.json()
+            const hasRecentGoals = recentData.weeklyGoal || recentData.goals?.some((g: string) => g) || 
+                                   recentData.excitingGoal || recentData.eoyGoal || recentData.monthlyGoal
             
-            if (hasYesterdayGoals) {
-              // Use yesterday's goals but keep today's date
+            if (hasRecentGoals && recentData.daysAgo) {
+              // Use recent goals but keep today's date
               finalData = {
-                ...yesterdayData,
+                ...recentData,
                 date: dateStr, // Keep today's date
                 source: "local"
               }
+              daysAgo = recentData.daysAgo
             }
           }
         } catch (e) {
-          console.warn("Failed to load yesterday's goals:", e)
+          console.warn("Failed to load recent goals:", e)
         }
       }
 
@@ -117,6 +123,7 @@ export default function DailyGoals() {
         excitingGoal: finalData.excitingGoal || "",
         eoyGoal: finalData.eoyGoal || "",
         monthlyGoal: finalData.monthlyGoal || "",
+        daysAgo
       }
       
       setWeeklyGoal(filled.weeklyGoal)
@@ -125,6 +132,7 @@ export default function DailyGoals() {
       setExcitingGoal(filled.excitingGoal || "")
       setEoyGoal(filled.eoyGoal || "")
       setMonthlyGoal(filled.monthlyGoal || "")
+      setGoalsDaysAgo(daysAgo)
       // Notify listeners immediately
       try { window.dispatchEvent(new CustomEvent('dailyGoalsUpdated', { detail: filled })) } catch {}
 
@@ -139,6 +147,7 @@ export default function DailyGoals() {
         setExcitingGoal(local.excitingGoal || "")
         setEoyGoal(local.eoyGoal || "")
         setMonthlyGoal(local.monthlyGoal || "")
+        setGoalsDaysAgo(local.daysAgo || null)
         try { window.dispatchEvent(new CustomEvent('dailyGoalsUpdated', { detail: local })) } catch {}
       } else {
         // empty state: let user type manually
@@ -147,6 +156,7 @@ export default function DailyGoals() {
         setExcitingGoal("")
         setEoyGoal("")
         setMonthlyGoal("")
+        setGoalsDaysAgo(null)
         setSource("local")
         setError(e?.message || "Unable to load goals")
       }
@@ -163,6 +173,12 @@ export default function DailyGoals() {
   // Persist manual edits locally for today
   useEffect(() => {
     if (loading) return
+    
+    // Clear the daysAgo indicator when user starts editing - these are now "current" goals
+    if (goalsDaysAgo !== null) {
+      setGoalsDaysAgo(null)
+    }
+    
     const snapshot: GoalsResponse = {
       date: dateStr,
       weeklyGoal,
@@ -171,6 +187,7 @@ export default function DailyGoals() {
       excitingGoal,
       eoyGoal,
       monthlyGoal,
+      daysAgo: null, // Always null for user edits since they're now current
     }
     saveToLocal(snapshot)
     // Also broadcast on each local edit
@@ -271,11 +288,23 @@ export default function DailyGoals() {
             </div>
             <div>
               <div className="text-sm text-zinc-700">Today's Focus</div>
-              <div className="text-xs text-zinc-500">{dateStr}</div>
+              <div className="text-xs text-zinc-500">
+                {dateStr}
+                {goalsDaysAgo && (
+                  <span className="ml-2 text-blue-600">
+                    (using goals from {goalsDaysAgo} day{goalsDaysAgo > 1 ? 's' : ''} ago)
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="border-white/30 text-zinc-700 bg-white/20">{source === "notion" ? "Notion" : "Local"}</Badge>
+            {goalsDaysAgo && (
+              <Badge variant="outline" className="border-blue-300 text-blue-700 bg-blue-100/50">
+                From {goalsDaysAgo} day{goalsDaysAgo > 1 ? 's' : ''} ago
+              </Badge>
+            )}
             <Button size="sm" variant="outline" className="bg-white/30 border-white/40 text-zinc-700 hover:bg-white/50" onClick={fetchGoals} disabled={loading}>
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </Button>

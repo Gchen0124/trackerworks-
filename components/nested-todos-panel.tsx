@@ -34,6 +34,12 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
   const [notesSaving, setNotesSaving] = useState(false)
   // Track pending edits to prevent data loss
   const [pendingEdits, setPendingEdits] = useState<Record<string, string>>({}) // id -> title
+  // Track which goals are expanded/collapsed
+  const [goalExpanded, setGoalExpanded] = useState<Record<string, boolean>>({
+    goal1: true,
+    goal2: true, 
+    goal3: true
+  })
 
   // Local done state persisted in localStorage
   const STORAGE_KEY = "nestedTodosDone:v1"
@@ -290,13 +296,15 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     if (!res.ok) throw new Error('delete_failed')
   }, [])
 
-  // Load root lists when panel opens
+  // Load root lists when panel opens or when goals are expanded
   useEffect(() => {
     if (!open) return
     ;(['goal1','goal2','goal3'] as GoalKey[]).forEach((gk) => {
-      loadList(gk, null)
+      if (goalExpanded[gk]) {
+        loadList(gk, null)
+      }
     })
-  }, [open, loadList, refreshKey])
+  }, [open, loadList, refreshKey, goalExpanded])
 
   // Helpers
   const labelForIndex = (i: number) => goals[i] || `Goal ${i + 1}`
@@ -329,6 +337,17 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     } catch (e) {
       console.error('Failed to toggle goal completion:', e)
     }
+  }
+
+  const toggleGoalExpansion = (goalKey: GoalKey) => {
+    setGoalExpanded(prev => {
+      const newExpanded = { ...prev, [goalKey]: !prev[goalKey] }
+      // If expanding, load the tasks for this goal
+      if (newExpanded[goalKey]) {
+        loadList(goalKey, null)
+      }
+      return newExpanded
+    })
   }
 
   return (
@@ -385,31 +404,43 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
                     <Button size="icon" variant="ghost" className="text-zinc-400 hover:text-zinc-200" onClick={() => setRefreshKey(k => k + 1)} title="Refresh">
                       <RefreshCw className="w-4 h-4" />
                     </Button>
-                    <Button size="sm" variant="ghost" className="text-zinc-300 hover:text-white" onClick={() => loadList(goalKey, null)}>
-                      <ChevronRight className="w-4 h-4 mr-1" /> Reload
+                    <Button 
+                      size="icon" 
+                      variant="ghost" 
+                      className="text-zinc-300 hover:text-white" 
+                      onClick={() => toggleGoalExpansion(goalKey)}
+                      title={goalExpanded[goalKey] ? "Hide tasks" : "Show tasks"}
+                    >
+                      {goalExpanded[goalKey] ? (
+                        <ChevronDown className="w-4 h-4" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4" />
+                      )}
                     </Button>
                   </div>
                 </div>
-                <div className="px-3 py-2">
-                  <List
-                    goalKey={goalKey}
-                    parentId={null}
-                    keyFor={keyFor}
-                    tree={tree}
-                    setTree={setTree}
-                    loading={loading}
-                    expanded={expanded}
-                    setExpanded={setExpanded}
-                    loadList={loadList}
-                    saveChildren={saveChildren}
-                    updateTitle={updateTitle}
-                    deleteItem={deleteItem}
-                    isChecked={isChecked}
-                    setChecked={setChecked}
-                    pendingEdits={pendingEdits}
-                    setPendingEdits={setPendingEdits}
-                  />
-                </div>
+                {goalExpanded[goalKey] && (
+                  <div className="px-3 py-2">
+                    <List
+                      goalKey={goalKey}
+                      parentId={null}
+                      keyFor={keyFor}
+                      tree={tree}
+                      setTree={setTree}
+                      loading={loading}
+                      expanded={expanded}
+                      setExpanded={setExpanded}
+                      loadList={loadList}
+                      saveChildren={saveChildren}
+                      updateTitle={updateTitle}
+                      deleteItem={deleteItem}
+                      isChecked={isChecked}
+                      setChecked={setChecked}
+                      pendingEdits={pendingEdits}
+                      setPendingEdits={setPendingEdits}
+                    />
+                  </div>
+                )}
               </div>
             )
           })}
