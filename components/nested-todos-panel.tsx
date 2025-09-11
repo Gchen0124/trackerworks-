@@ -396,7 +396,7 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
                     <Checkbox
                       checked={goalChecked as any}
                       onCheckedChange={(v) => toggleGoal(goalKey, Boolean(v))}
-                      className="data-[state=indeterminate]:bg-zinc-700"
+                      className="border-zinc-400 bg-transparent rounded-md data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=indeterminate]:bg-zinc-700 data-[state=indeterminate]:border-zinc-400"
                     />
                     <div className="font-medium text-zinc-100 truncate" title={labelForIndex(index)}>{labelForIndex(index)}</div>
                   </div>
@@ -667,7 +667,7 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
         <Checkbox
           checked={checked as any}
           onCheckedChange={(v) => setChecked(item.id, Boolean(v))}
-          className="mt-1"
+          className="mt-1 border-zinc-400 bg-transparent rounded-md data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
         />
         <div className="flex-1 min-w-0">
           <Input
