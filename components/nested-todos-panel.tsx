@@ -468,6 +468,36 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     return { all, none, some }
   }
 
+  // Find the next unfinished goal and task for highlighting
+  const getNextUnfinishedItems = useMemo(() => {
+    const goalKeys: GoalKey[] = ['goal1', 'goal2', 'goal3']
+    let nextGoal: GoalKey | null = null
+    let nextTask: { goalKey: GoalKey; taskId: string } | null = null
+
+    for (const goalKey of goalKeys) {
+      const agg = aggregateForKey(goalKey)
+      
+      // Find first unfinished goal
+      if (!nextGoal && !agg.all) {
+        nextGoal = goalKey
+      }
+
+      // Find first unfinished task in this goal
+      if (!nextTask) {
+        const items = tree[keyFor(goalKey, null)] || []
+        const firstUnfinishedTask = items.find(item => !item.is_completed)
+        if (firstUnfinishedTask) {
+          nextTask = { goalKey, taskId: firstUnfinishedTask.id }
+        }
+      }
+
+      // Break if we found both
+      if (nextGoal && nextTask) break
+    }
+
+    return { nextGoal, nextTask }
+  }, [tree, keyFor])
+
   const toggleGoal = async (goalKey: GoalKey, value: boolean, element?: Element | null) => {
     const items = tree[keyFor(goalKey, null)] || []
     try {
@@ -541,9 +571,15 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
             const goalKey = goalKeyForIndex(index)
             const agg = aggregateForKey(goalKey)
             const goalChecked: boolean | 'indeterminate' = agg.some ? 'indeterminate' : agg.all
+            const isNextGoal = getNextUnfinishedItems.nextGoal === goalKey
 
             return (
-              <div key={index} className="rounded-lg border border-zinc-800 bg-zinc-950/60">
+              <div 
+                key={index} 
+                className={`rounded-lg border border-zinc-800 bg-zinc-950/60 ${
+                  isNextGoal ? 'next-goal-highlight' : ''
+                }`}
+              >
                 <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
                   <div className="flex items-center gap-2 min-w-0">
                     <Checkbox
@@ -552,7 +588,9 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
                         const checkbox = document.activeElement as Element
                         toggleGoal(goalKey, Boolean(v), checkbox)
                       }}
-                      className="border-zinc-400 bg-transparent rounded-md data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=indeterminate]:bg-zinc-700 data-[state=indeterminate]:border-zinc-400"
+                      className={`border-zinc-400 bg-transparent rounded-md data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=indeterminate]:bg-zinc-700 data-[state=indeterminate]:border-zinc-400 ${
+                        isNextGoal ? 'next-task-checkbox' : ''
+                      }`}
                     />
                     <div className="font-medium text-zinc-100 truncate" title={labelForIndex(index)}>{labelForIndex(index)}</div>
                   </div>
@@ -594,6 +632,7 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
                       setChecked={setChecked}
                       pendingEdits={pendingEdits}
                       setPendingEdits={setPendingEdits}
+                      nextTask={getNextUnfinishedItems.nextTask}
                     />
                   </div>
                 )}
@@ -623,6 +662,7 @@ function List({
   setChecked,
   pendingEdits,
   setPendingEdits,
+  nextTask,
 }: {
   goalKey: GoalKey
   parentId: string | null
@@ -640,6 +680,7 @@ function List({
   setChecked: (id: string, v: boolean, element?: Element | null) => Promise<void>
   pendingEdits: Record<string, string>
   setPendingEdits: React.Dispatch<React.SetStateAction<Record<string, string>>>
+  nextTask?: { goalKey: GoalKey; taskId: string } | null
 }) {
   const listKey = keyFor(goalKey, parentId)
   const items = tree[listKey]
@@ -721,6 +762,7 @@ function List({
             pendingEdits={pendingEdits}
             setPendingEdits={setPendingEdits}
             setTree={setTree}
+            isNextTask={nextTask?.goalKey === goalKey && nextTask?.taskId === it.id}
           >
             {expanded[it.id] && (
               <List
@@ -740,6 +782,7 @@ function List({
                 setChecked={setChecked}
                 pendingEdits={pendingEdits}
                 setPendingEdits={setPendingEdits}
+                nextTask={nextTask}
               />
             )}
           </TreeNode>
@@ -749,7 +792,7 @@ function List({
   )
 }
 
-function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, setChecked, pendingEdits, setPendingEdits, setTree, children }: {
+function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, setChecked, pendingEdits, setPendingEdits, setTree, isNextTask, children }: {
   item: ItemRow
   expanded: boolean
   onExpand: (id: string) => void
@@ -760,6 +803,7 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
   pendingEdits: Record<string, string>
   setPendingEdits: React.Dispatch<React.SetStateAction<Record<string, string>>>
   setTree: React.Dispatch<React.SetStateAction<Record<string, ItemRow[]>>>
+  isNextTask?: boolean
   children?: React.ReactNode
 }) {
   // Use pending edit if available, otherwise use item title
@@ -820,7 +864,9 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
   const checked = isChecked(item)
 
   return (
-    <div className="group rounded-md hover:bg-zinc-900/50 px-2 py-1 relative">
+    <div className={`group rounded-md hover:bg-zinc-900/50 px-2 py-1 relative ${
+      isNextTask && !checked ? 'next-task-highlight' : ''
+    }`}>
       <div className="flex items-start gap-2">
         <button onClick={() => onExpand(item.id)} className="mt-1 text-zinc-400 hover:text-zinc-200">
           {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
@@ -831,7 +877,9 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
             const checkbox = document.activeElement as Element
             setChecked(item.id, Boolean(v), checkbox)
           }}
-          className="mt-1 border-zinc-400 bg-transparent rounded-md data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+          className={`mt-1 border-zinc-400 bg-transparent rounded-md data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 ${
+            isNextTask && !checked ? 'next-task-checkbox' : ''
+          }`}
         />
         <div className="flex-1 min-w-0">
           <Input
@@ -844,7 +892,9 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
                 e.currentTarget.blur() // This will trigger the commit
               }
             }}
-            className="h-6 bg-zinc-900/60 border-zinc-800 text-zinc-100 placeholder:text-zinc-500 text-sm"
+            className={`h-6 bg-zinc-900/60 border-zinc-800 text-zinc-100 placeholder:text-zinc-500 text-sm ${
+              isNextTask && !checked ? 'next-task-highlight' : ''
+            }`}
             placeholder="Untitled"
           />
         </div>
