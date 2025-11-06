@@ -116,7 +116,7 @@ export const timerSessions = sqliteTable("timer_sessions", {
 export const userPreferences = sqliteTable("user_preferences", {
   id: text("id").primaryKey().default("default"),
   blockDurationMinutes: integer("block_duration_minutes").default(30),
-  enableHalfHourAlerts: integer("enable_half_hour_alerts", { mode: "boolean" }).default(false),
+  alertIntervalMinutes: integer("enable_half_hour_alerts").default(30), // stores cadence in minutes (0=off)
   showNestedTodos: integer("show_nested_todos", { mode: "boolean" }).default(true),
   gradientIndex: integer("gradient_index").default(0),
   lastActiveWindowStart: integer("last_active_window_start"),

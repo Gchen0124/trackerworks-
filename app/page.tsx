@@ -79,6 +79,8 @@ interface PlanningMode {
   taskToFill: any | null
 }
 
+type AlertInterval = 0 | 15 | 30
+
 export default function TimeTracker() {
   const [currentTime, setCurrentTime] = useState<Date | null>(null)
   const [isTimerRunning, setIsTimerRunning] = useState(false)
@@ -118,46 +120,43 @@ export default function TimeTracker() {
     isExpandMode: false,
   })
 
-  // Manually trigger the next upcoming half-hour alert (for testing)
-  const triggerNextHalfHourAlert = async () => {
+  const formatVoiceAlertTarget = (hour24: number, minute: number) => {
+    const period = hour24 < 12 ? 'AM' : 'PM'
+    const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12
+    if (minute === 0) return `${hour12} ${period}`
+    return `${hour12}:${minute.toString().padStart(2, '0')} ${period}`
+  }
+
+  const getNextVoiceAlertTarget = (now: Date, interval: number) => {
+    const currentMinutes = now.getMinutes()
+    const bucket = Math.floor(currentMinutes / interval)
+    const rawNext = (bucket + 1) * interval
+    const extraHours = Math.floor(rawNext / 60)
+    const targetMinute = rawNext % 60
+    const targetHour = (now.getHours() + extraHours) % 24
+    return { targetHour, targetMinute }
+  }
+
+  // Manually trigger the next upcoming alert (for testing)
+  const triggerVoiceAlertPreview = async () => {
+    const interval = alertIntervalMinutes || 30
     try {
       const now = new Date()
-      const m = now.getMinutes()
-      const hh = now.getHours()
       await playJoyfulChime()
-      // Respect popup gating to simulate real behavior
       if (showProgressCheck) return
-      
-      // Calculate progress information using component-scoped variables
+
       const passedBlocks = activePassedBlocks || 0
       const leftBlocks = activeLeftBlocks || 0
       const passedTime = blocksToTime(passedBlocks)
       const leftTime = blocksToTime(leftBlocks)
-      
-      if (m < 29) {
-        const targetHour = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh
-        const targetPeriod = hh < 12 ? 'AM' : 'PM'
-        const target = `${targetHour}:30 ${targetPeriod}`
-        const text = `cheer up, it's almost ${target}`
-        const progressText = passedBlocks > 0 || leftBlocks > 0 
-          ? `. ${passedBlocks} blocks, ${passedTime} passed, ${leftBlocks} blocks, ${leftTime} left for today`
-          : ''
-        const fullText = text + progressText
-        maybeShowSystemNotification(fullText)
-        await playMaleTts(fullText)
-      } else {
-        const nextHour = (hh + 1) % 24
-        const targetHour = nextHour === 0 ? 12 : nextHour > 12 ? nextHour - 12 : nextHour
-        const targetPeriod = nextHour < 12 ? 'AM' : 'PM'
-        const target = `${targetHour} ${targetPeriod}`
-        const text = `cheer up, it's almost ${target}`
-        const progressText = passedBlocks > 0 || leftBlocks > 0 
-          ? `. ${passedBlocks} blocks, ${passedTime} passed, ${leftBlocks} blocks, ${leftTime} left for today`
-          : ''
-        const fullText = text + progressText
-        maybeShowSystemNotification(fullText)
-        await playMaleTts(fullText)
-      }
+      const { targetHour, targetMinute } = getNextVoiceAlertTarget(now, interval)
+      const target = formatVoiceAlertTarget(targetHour, targetMinute)
+      const progressText = passedBlocks > 0 || leftBlocks > 0
+        ? `. ${passedBlocks} blocks, ${passedTime} passed, ${leftBlocks} blocks, ${leftTime} left for today`
+        : ''
+      const fullText = `cheer up, it's almost ${target}${progressText}`
+      maybeShowSystemNotification(fullText)
+      await playMaleTts(fullText)
     } catch {}
   }
 
@@ -170,8 +169,8 @@ export default function TimeTracker() {
     taskToFill: null,
   })
   // Half-hour voice alerts (male TTS) toggle
-  const [enableHalfHourAlerts, setEnableHalfHourAlerts] = useState(false)
-  const lastHalfHourAnnouncedRef = useRef<string | null>(null)
+  const [alertIntervalMinutes, setAlertIntervalMinutes] = useState<AlertInterval>(30)
+  const lastVoiceAlertKeyRef = useRef<string | null>(null)
   // Keep a mirror of 1-minute blocks for the full day. This lets us:
   // - Sync any 30/3-minute edits downward into 1-minute resolution
   // - Use 1-minute edits locally without affecting higher-level modes
@@ -662,58 +661,40 @@ export default function TimeTracker() {
 
 
   useEffect(() => {
-    if (!enableHalfHourAlerts) return
+    if (!alertIntervalMinutes) return
     if (!currentTime) return
     if (showProgressCheck) return // avoid conflict with progress popup
 
     const now = currentTime
     const m = now.getMinutes()
     const s = now.getSeconds()
-    if (!(m === 29 || m === 59)) return
+    if (alertIntervalMinutes <= 0) return
+    if (m % alertIntervalMinutes !== alertIntervalMinutes - 1) return
     // Only trigger near the top of the minute to avoid multiple fires
     if (s > 5) return
 
     const key = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}-${m}`
-    if (lastHalfHourAnnouncedRef.current === key) return
-    lastHalfHourAnnouncedRef.current = key
+    if (lastVoiceAlertKeyRef.current === key) return
+    lastVoiceAlertKeyRef.current = key
 
-    const hh = now.getHours()
     ;(async () => {
-      // Play chime first
       await playJoyfulChime()
-      // If popup opened during chime, skip announcement
       if (showProgressCheck) return
-      
-      // Calculate progress information using component-scoped variables
+
       const passedBlocks = activePassedBlocks || 0
       const leftBlocks = activeLeftBlocks || 0
       const passedTime = blocksToTime(passedBlocks)
       const leftTime = blocksToTime(leftBlocks)
-      
-      if (m === 29) {
-        const targetHour = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh
-        const targetPeriod = hh < 12 ? 'AM' : 'PM'
-        const target = `${targetHour}:30 ${targetPeriod}`
-        const progressText = passedBlocks > 0 || leftBlocks > 0 
-          ? `. ${passedBlocks} blocks, ${passedTime} passed, ${leftBlocks} blocks, ${leftTime} left for today`
-          : ''
-        const text = `cheer up, it's almost ${target}${progressText}`
-        maybeShowSystemNotification(text)
-        await playMaleTts(text)
-      } else {
-        const nextHour = (hh + 1) % 24
-        const targetHour = nextHour === 0 ? 12 : nextHour > 12 ? nextHour - 12 : nextHour
-        const targetPeriod = nextHour < 12 ? 'AM' : 'PM'
-        const target = `${targetHour} ${targetPeriod}`
-        const progressText = passedBlocks > 0 || leftBlocks > 0 
-          ? `. ${passedBlocks} blocks, ${passedTime} passed, ${leftBlocks} blocks, ${leftTime} left for today`
-          : ''
-        const text = `cheer up, it's almost ${target}${progressText}`
-        maybeShowSystemNotification(text)
-        await playMaleTts(text)
-      }
+      const { targetHour, targetMinute } = getNextVoiceAlertTarget(now, alertIntervalMinutes)
+      const target = formatVoiceAlertTarget(targetHour, targetMinute)
+      const progressText = passedBlocks > 0 || leftBlocks > 0
+        ? `. ${passedBlocks} blocks, ${passedTime} passed, ${leftBlocks} blocks, ${leftTime} left for today`
+        : ''
+      const text = `cheer up, it's almost ${target}${progressText}`
+      maybeShowSystemNotification(text)
+      await playMaleTts(text)
     })()
-  }, [currentTime, enableHalfHourAlerts, showProgressCheck])
+  }, [alertIntervalMinutes, currentTime, showProgressCheck])
 
   // Snapshot the current mode's blocks so we can restore when returning to that mode
   useEffect(() => {
@@ -757,18 +738,17 @@ export default function TimeTracker() {
     }
   }
 
-  // Save half-hour alerts setting to database
-  const toggleHalfHourAlerts = async () => {
-    const newValue = !enableHalfHourAlerts
-    setEnableHalfHourAlerts(newValue)
+  // Persist voice alert cadence
+  const updateAlertInterval = async (nextValue: AlertInterval) => {
+    setAlertIntervalMinutes(nextValue)
     try {
       await fetch('/api/local/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enableHalfHourAlerts: newValue })
+        body: JSON.stringify({ alertIntervalMinutes: nextValue })
       })
     } catch (error) {
-      console.warn('Failed to save half-hour alerts setting:', error)
+      console.warn('Failed to save alert interval:', error)
     }
   }
 
@@ -780,15 +760,14 @@ export default function TimeTracker() {
         if (response.ok) {
           const settings = await response.json()
           setBlockDurationMinutes(settings.blockDurationMinutes ?? 30)
-          setEnableHalfHourAlerts(settings.enableHalfHourAlerts ?? true)
+          const interval = typeof settings.alertIntervalMinutes === 'number' ? settings.alertIntervalMinutes : 30
+          setAlertIntervalMinutes((interval === 15 || interval === 30 || interval === 0) ? interval : 30)
         } else {
-          // If API fails, set default to enable half-hour alerts
-          setEnableHalfHourAlerts(true)
+          setAlertIntervalMinutes(30)
         }
       } catch (error) {
         console.warn('Failed to load settings:', error)
-        // If API fails, set default to enable half-hour alerts
-        setEnableHalfHourAlerts(true)
+        setAlertIntervalMinutes(30)
       }
     }
     loadSettings()
@@ -2450,22 +2429,28 @@ export default function TimeTracker() {
                 Undo
               </Button>
             )}
-            {/* Half-hour Alerts controls moved to header */}
+            {/* Voice alert cadence */}
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">Half-hour Alerts:</span>
-              <Button
-                variant={enableHalfHourAlerts ? "default" : "secondary"}
-                onClick={toggleHalfHourAlerts}
-                className="min-w-28"
-                title="Announce at :29 and :59 using a male voice"
+              <span className="text-sm font-medium">Voice Alert:</span>
+              <Select
+                value={String(alertIntervalMinutes)}
+                onValueChange={(value) => updateAlertInterval(Number(value) as AlertInterval)}
               >
-                {enableHalfHourAlerts ? "On" : "Off"}
-              </Button>
+                <SelectTrigger className="w-36" title="Choose how often to hear the 'cheer up' reminder">
+                  <SelectValue placeholder="Select cadence" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="30">Every 30 min</SelectItem>
+                  <SelectItem value="15">Every 15 min</SelectItem>
+                  <SelectItem value="0">Off</SelectItem>
+                </SelectContent>
+              </Select>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={triggerNextHalfHourAlert}
-                title="Play the chime and announce the next upcoming half-hour"
+                onClick={triggerVoiceAlertPreview}
+                title="Play the chime and announce the next interval"
+                disabled={!alertIntervalMinutes}
               >
                 Test
               </Button>
