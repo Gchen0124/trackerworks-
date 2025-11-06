@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: trackerworks
+    runtime: node
+    region: oregon
+    plan: starter
+    buildCommand: corepack enable && corepack prepare pnpm@10.13.1 --activate && pnpm install && pnpm build
+    startCommand: pnpm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.0
+      - key: LOCAL_SQLITE_PATH
+        value: /opt/render/project/.data/app.db
+      - key: OPENAI_API_KEY
+        sync: false  # Set manually in Render dashboard
+      - key: OPENAI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: HUGGINGFACE_API_TOKEN
+        sync: false  # Set manually in Render dashboard (optional)
+      - key: NOTION_TOKEN
+        sync: false  # Set manually in Render dashboard (optional)
+      - key: NOTION_DAILY_RITUAL_DB_ID
+        sync: false  # Set manually in Render dashboard (optional)
+      - key: NOTION_TASK_CAL_DB_ID
+        sync: false  # Set manually in Render dashboard (optional)
+    disk:
+      name: data
+      mountPath: /opt/render/project/.data
+      sizeGB: 1
+    healthCheckPath: /api/health
