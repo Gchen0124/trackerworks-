@@ -121,6 +121,10 @@ export const userPreferences = sqliteTable("user_preferences", {
   gradientIndex: integer("gradient_index").default(0),
   lastActiveWindowStart: integer("last_active_window_start"),
   lastActiveWindowEnd: integer("last_active_window_end"),
+  // Notion integration credentials
+  notionToken: text("notion_token"),
+  notionDailyRitualDbId: text("notion_daily_ritual_db_id"),
+  notionTaskCalDbId: text("notion_task_cal_db_id"),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).default(() => Date.now()),
 })
 

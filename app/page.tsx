@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils"
 import TaskSelector from "@/components/task-selector"
 import VoiceInterface from "@/components/voice-interface"
 import NotionTasks from "@/components/notion-tasks"
+import NotionSettings from "@/components/notion-settings"
 import QuickTaskInput from "@/components/quick-task-input"
 import ProgressCheckPopup from "@/components/progress-check-popup"
 import DailyGoals from "@/components/daily-goals"
@@ -93,6 +94,7 @@ export default function TimeTracker() {
   const [showTaskSelector, setShowTaskSelector] = useState(false)
   const [showVoiceInterface, setShowVoiceInterface] = useState(false)
   const [showNotionTasks, setShowNotionTasks] = useState(false)
+  const [showNotionSettings, setShowNotionSettings] = useState(false)
   const [timerSeconds, setTimerSeconds] = useState(0)
   const [showQuickInput, setShowQuickInput] = useState(false)
   const [quickInputPosition, setQuickInputPosition] = useState({ x: 0, y: 0 })
@@ -2463,6 +2465,9 @@ export default function TimeTracker() {
             <Button variant="outline" className="flex items-center gap-2" onClick={exportTodayCsv}>
               Export CSV
             </Button>
+            <Button variant="outline" size="icon" onClick={() => setShowNotionSettings(true)} title="Configure Notion Integration">
+              <Database className="h-4 w-4" />
+            </Button>
             <Button variant="outline" size="icon" onClick={() => setShowActiveWindowSetup(true)} title="Set wake/start and sleep times">
               <MoonStar className="h-4 w-4" />
             </Button>
@@ -3027,6 +3032,13 @@ export default function TimeTracker() {
             }}
           />
         )}
+
+        {/* Notion Settings Modal */}
+        <NotionSettings
+          isOpen={showNotionSettings}
+          onClose={() => setShowNotionSettings(false)}
+        />
+
         {/* Nested Todos Side Panel */}
         <NestedTodosPanel open={showNestedTodos} onOpenChange={setShowNestedTodos} />
         {/* Quick Task Input */}

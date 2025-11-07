@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { notion, NOTION_DAILY_RITUAL_DB_ID, DR_PROPS } from "@/lib/notion"
+import { getNotionClient, getNotionCredentials, DR_PROPS } from "@/lib/notion"
 
 // Extract plain text from a property that could be rich_text, title, or rollup of arrays
 function propToPlainStrings(prop: any): string[] {
@@ -31,12 +31,20 @@ function propToPlainStrings(prop: any): string[] {
 }
 
 export async function GET(_req: NextRequest) {
-  if (!NOTION_DAILY_RITUAL_DB_ID) {
-    return new Response(JSON.stringify({ ok: false, error: "Missing NOTION_DAILY_RITUAL_DB_ID env." }), { status: 500 })
+  const credentials = getNotionCredentials()
+  const notion = getNotionClient()
+
+  if (!credentials.dailyRitualDbId) {
+    return new Response(JSON.stringify({ ok: false, error: "Missing Notion Daily Ritual database ID. Please configure it in settings." }), { status: 500 })
   }
+
+  if (!credentials.token) {
+    return new Response(JSON.stringify({ ok: false, error: "Missing Notion token. Please configure it in settings." }), { status: 500 })
+  }
+
   try {
     const res = await notion.databases.query({
-      database_id: NOTION_DAILY_RITUAL_DB_ID,
+      database_id: credentials.dailyRitualDbId,
       page_size: 50,
       sorts: [
         { timestamp: "last_edited_time", direction: "descending" },

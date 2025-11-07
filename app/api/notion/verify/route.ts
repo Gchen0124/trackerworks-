@@ -1,24 +1,34 @@
 import { NextRequest } from "next/server"
-import { notion, NOTION_DAILY_RITUAL_DB_ID, NOTION_TASK_CAL_DB_ID } from "@/lib/notion"
+import { getNotionClient, getNotionCredentials } from "@/lib/notion"
 
 export async function GET(_req: NextRequest) {
-  if (!NOTION_DAILY_RITUAL_DB_ID || !NOTION_TASK_CAL_DB_ID) {
+  const credentials = getNotionCredentials()
+  const notion = getNotionClient()
+
+  if (!credentials.dailyRitualDbId || !credentials.taskCalDbId) {
     return new Response(
-      JSON.stringify({ error: "Missing NOTION_DAILY_RITUAL_DB_ID or NOTION_TASK_CAL_DB_ID env." }),
+      JSON.stringify({ error: "Missing Notion database IDs. Please configure them in settings." }),
+      { status: 500 },
+    )
+  }
+
+  if (!credentials.token) {
+    return new Response(
+      JSON.stringify({ error: "Missing Notion token. Please configure it in settings." }),
       { status: 500 },
     )
   }
 
   try {
     const [drSchema, tcSchema] = await Promise.all([
-      notion.databases.retrieve({ database_id: NOTION_DAILY_RITUAL_DB_ID }),
-      notion.databases.retrieve({ database_id: NOTION_TASK_CAL_DB_ID }),
+      notion.databases.retrieve({ database_id: credentials.dailyRitualDbId }),
+      notion.databases.retrieve({ database_id: credentials.taskCalDbId }),
     ])
 
     // Minimal queries to confirm access
     const [drSample, tcSample] = await Promise.all([
-      notion.databases.query({ database_id: NOTION_DAILY_RITUAL_DB_ID, page_size: 1 }),
-      notion.databases.query({ database_id: NOTION_TASK_CAL_DB_ID, page_size: 1 }),
+      notion.databases.query({ database_id: credentials.dailyRitualDbId, page_size: 1 }),
+      notion.databases.query({ database_id: credentials.taskCalDbId, page_size: 1 }),
     ])
 
     const drTitleArr = (drSchema as any)?.title || []

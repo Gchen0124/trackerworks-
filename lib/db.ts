@@ -52,13 +52,16 @@ CREATE INDEX IF NOT EXISTS idx_breakdown_parent ON breakdown_items(parent_id);
 CREATE INDEX IF NOT EXISTS idx_breakdown_goal ON breakdown_items(goal_id);
 `)
 
-// Settings for local preferences (block duration, alerts, tz)
+// Settings for local preferences (block duration, alerts, tz, notion)
 sqlite.exec(`
 CREATE TABLE IF NOT EXISTS user_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   block_duration_minutes INTEGER NOT NULL DEFAULT 30,
   enable_half_hour_alerts INTEGER NOT NULL DEFAULT 30, -- stores cadence in minutes (0=off)
   time_zone TEXT NOT NULL DEFAULT 'UTC',
+  notion_token TEXT,
+  notion_daily_ritual_db_id TEXT,
+  notion_task_cal_db_id TEXT,
   created_at INTEGER DEFAULT (strftime('%s','now')*1000),
   updated_at INTEGER DEFAULT (strftime('%s','now')*1000)
 );

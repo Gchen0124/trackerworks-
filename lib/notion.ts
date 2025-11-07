@@ -1,21 +1,41 @@
 import { Client } from "@notionhq/client"
+import { sqlite } from "@/lib/db"
 
 // Centralized Notion client + helpers
-// Configure via .env.local
-// - NOTION_TOKEN
-// - NOTION_DAILY_RITUAL_DB_ID
-// - NOTION_TASK_CAL_DB_ID
-// Optional overrides for property names (defaults assumed below):
-// - NOTION_DR_DATE_PROP (default: "Date")
-// - NOTION_DR_WEEKLY_GOAL_PROP (default: "Weekly Goal")
-// - NOTION_DR_GOAL1_PROP (default: "Goal 1")
-// - NOTION_DR_GOAL2_PROP (default: "Goal 2")
-// - NOTION_DR_GOAL3_PROP (default: "Goal 3")
+// Now supports both env variables (for backwards compatibility) and database credentials
+// Priority: Database credentials > Environment variables
 
-export const notion = new Client({ auth: process.env.NOTION_TOKEN })
+// Get credentials from database or fallback to env variables
+export function getNotionCredentials() {
+  try {
+    const row = sqlite.prepare(`SELECT notion_token, notion_daily_ritual_db_id, notion_task_cal_db_id FROM user_settings WHERE id = 1`).get() as any
+    return {
+      token: row?.notion_token || process.env.NOTION_TOKEN || "",
+      dailyRitualDbId: row?.notion_daily_ritual_db_id || process.env.NOTION_DAILY_RITUAL_DB_ID || "",
+      taskCalDbId: row?.notion_task_cal_db_id || process.env.NOTION_TASK_CAL_DB_ID || "",
+    }
+  } catch (error) {
+    // Fallback to env variables if database read fails
+    return {
+      token: process.env.NOTION_TOKEN || "",
+      dailyRitualDbId: process.env.NOTION_DAILY_RITUAL_DB_ID || "",
+      taskCalDbId: process.env.NOTION_TASK_CAL_DB_ID || "",
+    }
+  }
+}
 
-export const NOTION_DAILY_RITUAL_DB_ID = process.env.NOTION_DAILY_RITUAL_DB_ID || ""
-export const NOTION_TASK_CAL_DB_ID = process.env.NOTION_TASK_CAL_DB_ID || ""
+// Create Notion client with credentials
+export function getNotionClient() {
+  const { token } = getNotionCredentials()
+  return new Client({ auth: token })
+}
+
+// Legacy exports for backwards compatibility
+export const notion = getNotionClient()
+
+const credentials = getNotionCredentials()
+export const NOTION_DAILY_RITUAL_DB_ID = credentials.dailyRitualDbId
+export const NOTION_TASK_CAL_DB_ID = credentials.taskCalDbId
 export const NOTION_TASK_TITLE_PROP = process.env.NOTION_TASK_TITLE_PROP || "Name"
 
 export const DR_PROPS = {
