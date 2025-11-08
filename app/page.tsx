@@ -582,15 +582,25 @@ export default function TimeTracker() {
   const speakFallback = (text: string) => {
     try {
       if (typeof window === 'undefined') return
-      if (!('speechSynthesis' in window)) return
-      if (Notification.permission !== 'granted') return
+      const synth = window.speechSynthesis
+      if (!synth || typeof SpeechSynthesisUtterance === 'undefined') return
+
+      synth.cancel() // prevent overlapping announcements when API retries
+
       const utter = new SpeechSynthesisUtterance(text)
-      // Prefer a male-sounding English voice if available
-      const voices = window.speechSynthesis.getVoices()
-      const enMale = voices.find(v => /en/i.test(v.lang) && /male/i.test((v as any).name || ''))
+      utter.rate = 0.92
+      utter.pitch = 1
+
+      // Prefer a male-sounding English voice if the browser exposes one
+      const voices = synth.getVoices()
+      const maleNamePattern = /(male|daniel|alex|fred|george)/i
+      const enMale = voices.find((voice) => /en/i.test(voice.lang) && maleNamePattern.test(voice.name || ''))
       if (enMale) utter.voice = enMale
-      window.speechSynthesis.speak(utter)
-    } catch {}
+
+      synth.speak(utter)
+    } catch (error) {
+      console.warn('Speech synthesis fallback failed', error)
+    }
   }
 
   const playMaleTts = async (text: string) => {
