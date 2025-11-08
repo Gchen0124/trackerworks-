@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { notion, NOTION_TASK_CAL_DB_ID, NOTION_TASK_TITLE_PROP } from "@/lib/notion"
+import { getNotionClient, getNotionCredentials, NOTION_TASK_TITLE_PROP } from "@/lib/notion"
 
 // Extract title from a page (assumes a single title property exists)
 function getTitleFromPage(page: any): string {
@@ -15,16 +15,22 @@ function getTitleFromPage(page: any): string {
 }
 
 export async function GET(req: NextRequest) {
-  if (!NOTION_TASK_CAL_DB_ID) {
-    return new Response(JSON.stringify({ error: "Missing NOTION_TASK_CAL_DB_ID env." }), { status: 500 })
+  const credentials = getNotionCredentials()
+  if (!credentials.taskCalDbId) {
+    return new Response(JSON.stringify({ error: "Missing Notion Task Calendar database ID. Please configure it in settings." }), { status: 500 })
   }
+  if (!credentials.token) {
+    return new Response(JSON.stringify({ error: "Missing Notion token. Please configure it in settings." }), { status: 500 })
+  }
+
+  const notion = getNotionClient()
 
   const search = req.nextUrl.searchParams.get("search") || ""
   const pageSize = Math.min(Number(req.nextUrl.searchParams.get("limit") || 25), 100)
 
   try {
     const query: any = {
-      database_id: NOTION_TASK_CAL_DB_ID,
+      database_id: credentials.taskCalDbId,
       page_size: pageSize,
       sorts: [{ timestamp: "last_edited_time", direction: "descending" }],
     }

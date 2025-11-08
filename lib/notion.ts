@@ -31,11 +31,6 @@ export function getNotionClient() {
 }
 
 // Legacy exports for backwards compatibility
-export const notion = getNotionClient()
-
-const credentials = getNotionCredentials()
-export const NOTION_DAILY_RITUAL_DB_ID = credentials.dailyRitualDbId
-export const NOTION_TASK_CAL_DB_ID = credentials.taskCalDbId
 export const NOTION_TASK_TITLE_PROP = process.env.NOTION_TASK_TITLE_PROP || "Name"
 
 export const DR_PROPS = {

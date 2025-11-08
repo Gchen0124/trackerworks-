@@ -68,6 +68,18 @@ CREATE TABLE IF NOT EXISTS user_settings (
 INSERT OR IGNORE INTO user_settings (id) VALUES (1);
 `)
 
+// Older local databases might lack the Notion columns; add them on the fly so saves succeed.
+const userSettingsColumns = sqlite.prepare(`PRAGMA table_info(user_settings);`).all()
+const userSettingsColumnNames = new Set(userSettingsColumns.map((c: any) => c.name))
+const ensureUserSettingsColumn = (name: string, definition: string) => {
+  if (userSettingsColumnNames.has(name)) return
+  sqlite.exec(`ALTER TABLE user_settings ADD COLUMN ${name} ${definition};`)
+  userSettingsColumnNames.add(name)
+}
+ensureUserSettingsColumn('notion_token', 'TEXT')
+ensureUserSettingsColumn('notion_daily_ritual_db_id', 'TEXT')
+ensureUserSettingsColumn('notion_task_cal_db_id', 'TEXT')
+
 // Time blocks for different granularities (1,3,30 minutes)
 sqlite.exec(`
 CREATE TABLE IF NOT EXISTS time_blocks (

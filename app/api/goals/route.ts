@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { notion, NOTION_DAILY_RITUAL_DB_ID, NOTION_TASK_CAL_DB_ID, DR_PROPS, formatDateYYYYMMDD } from "@/lib/notion"
+import { getNotionClient, getNotionCredentials, DR_PROPS, formatDateYYYYMMDD } from "@/lib/notion"
 
 // Helper to extract plain text from a rich_text or title property
 function richTextToPlain(property: any): string {
@@ -31,9 +31,9 @@ function propToPlainStrings(prop: any): string[] {
   return []
 }
 
-async function getTaskTitle(pageId: string): Promise<string> {
+async function getTaskTitle(notionClient: any, pageId: string): Promise<string> {
   try {
-    const page: any = await notion.pages.retrieve({ page_id: pageId })
+    const page: any = await notionClient.pages.retrieve({ page_id: pageId })
     const props = page.properties
     // Commonly the title is in the Name property (title type)
     for (const key of Object.keys(props)) {
@@ -48,9 +48,9 @@ async function getTaskTitle(pageId: string): Promise<string> {
 }
 
 // Get the property type for the configured date property (date/title/rich_text)
-async function getDatePropType(): Promise<"date" | "title" | "rich_text" | "unknown"> {
+async function getDatePropType(notionClient: any, dailyRitualDbId: string): Promise<"date" | "title" | "rich_text" | "unknown"> {
   try {
-    const db: any = await notion.databases.retrieve({ database_id: NOTION_DAILY_RITUAL_DB_ID })
+    const db: any = await notionClient.databases.retrieve({ database_id: dailyRitualDbId })
     const prop = db?.properties?.[DR_PROPS.DATE]
     return (prop?.type as any) || "unknown"
   } catch {
@@ -59,8 +59,8 @@ async function getDatePropType(): Promise<"date" | "title" | "rich_text" | "unkn
 }
 
 // Query the Daily Ritual DB by date string, adapting to property type
-async function findDailyRitualByDate(dateStr: string) {
-  const propType = await getDatePropType()
+async function findDailyRitualByDate(notionClient: any, dailyRitualDbId: string, dateStr: string) {
+  const propType = await getDatePropType(notionClient, dailyRitualDbId)
   let filter: any
   if (propType === "date") {
     filter = { property: DR_PROPS.DATE, date: { equals: dateStr } }
@@ -72,18 +72,18 @@ async function findDailyRitualByDate(dateStr: string) {
     // Fallback: try title equals
     filter = { property: DR_PROPS.DATE, title: { equals: dateStr } }
   }
-  const response = await notion.databases.query({
-    database_id: NOTION_DAILY_RITUAL_DB_ID,
+  const response = await notionClient.databases.query({
+    database_id: dailyRitualDbId,
     filter,
     page_size: 1,
   })
   return response.results[0] as any | undefined
 }
 
-async function createDailyRitual(dateStr: string) {
+async function createDailyRitual(notionClient: any, dailyRitualDbId: string, dateStr: string) {
   // Create a minimal page with date set. Weekly/Goals left empty.
   const properties: any = {}
-  const propType = await getDatePropType()
+  const propType = await getDatePropType(notionClient, dailyRitualDbId)
   if (propType === "date") {
     properties[DR_PROPS.DATE] = { date: { start: dateStr } }
   } else if (propType === "title") {
@@ -95,8 +95,8 @@ async function createDailyRitual(dateStr: string) {
     properties[DR_PROPS.DATE] = { title: [{ type: "text", text: { content: dateStr } }] }
   }
   try {
-    const page = await notion.pages.create({
-      parent: { database_id: NOTION_DAILY_RITUAL_DB_ID },
+    const page = await notionClient.pages.create({
+      parent: { database_id: dailyRitualDbId },
       properties,
     })
     return page as any
@@ -112,22 +112,32 @@ function extractRelationIds(prop: any): string[] {
 }
 
 export async function GET(req: NextRequest) {
-  if (!NOTION_DAILY_RITUAL_DB_ID || !NOTION_TASK_CAL_DB_ID) {
+  const credentials = getNotionCredentials()
+  if (!credentials.dailyRitualDbId || !credentials.taskCalDbId) {
     return new Response(
-      JSON.stringify({ error: "Missing NOTION_DAILY_RITUAL_DB_ID or NOTION_TASK_CAL_DB_ID env." }),
+      JSON.stringify({ error: "Missing Notion database IDs. Please configure them in settings." }),
       { status: 500 },
     )
   }
+  if (!credentials.token) {
+    return new Response(
+      JSON.stringify({ error: "Missing Notion token. Please configure it in settings." }),
+      { status: 500 },
+    )
+  }
+
+  const notion = getNotionClient()
+  const dailyRitualDbId = credentials.dailyRitualDbId
 
   const now = new Date()
   const dateParam = req.nextUrl.searchParams.get("date")
   const dateStr = dateParam || formatDateYYYYMMDD(now)
 
   try {
-    let page = await findDailyRitualByDate(dateStr)
+    let page = await findDailyRitualByDate(notion, dailyRitualDbId, dateStr)
     if (!page) {
       // Create if missing (read or create new)
-      page = await createDailyRitual(dateStr)
+      page = await createDailyRitual(notion, dailyRitualDbId, dateStr)
     }
 
     const props = page.properties
@@ -140,9 +150,9 @@ export async function GET(req: NextRequest) {
     const goal3Ids = extractRelationIds(props?.[DR_PROPS.GOAL3])
 
     const [g1, g2, g3] = await Promise.all([
-      goal1Ids[0] ? getTaskTitle(goal1Ids[0]) : Promise.resolve(""),
-      goal2Ids[0] ? getTaskTitle(goal2Ids[0]) : Promise.resolve(""),
-      goal3Ids[0] ? getTaskTitle(goal3Ids[0]) : Promise.resolve(""),
+      goal1Ids[0] ? getTaskTitle(notion, goal1Ids[0]) : Promise.resolve(""),
+      goal2Ids[0] ? getTaskTitle(notion, goal2Ids[0]) : Promise.resolve(""),
+      goal3Ids[0] ? getTaskTitle(notion, goal3Ids[0]) : Promise.resolve(""),
     ])
 
     return Response.json({
