@@ -1276,8 +1276,13 @@ export default function TimeTracker() {
   }
 
   const handleTaskAssign = (task: any, blockId: string) => {
+    const normalizedTask = {
+      ...task,
+      type: task?.type || "custom",
+      color: task?.color || "bg-blue-500",
+    }
     setTimeBlocks((prev) =>
-      prev.map((block) => (block.id === blockId ? { ...block, task: { ...task, type: "custom" } } : block)),
+      prev.map((block) => (block.id === blockId ? { ...block, task: normalizedTask } : block)),
     )
     setShowTaskSelector(false)
     setSelectedBlock(null)

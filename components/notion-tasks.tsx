@@ -1,12 +1,16 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
-import { Search, Database, RefreshCw, ExternalLink } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Search, Database, RefreshCw, ExternalLink, Loader2, Info, ChevronRight } from "lucide-react"
+import { NotionTaskItem } from "@/types/notion"
+import { colorFromNotionTask, statusBadgeClass } from "@/lib/task-colors"
 
 interface NotionTasksProps {
   isOpen: boolean
@@ -14,175 +18,105 @@ interface NotionTasksProps {
   onTaskSelect: (task: any) => void
 }
 
-interface NotionTask {
-  id: string
-  title: string
-  description: string
-  status: string
-  priority: string
-  database: string
-  url: string
-  color: string
-  tags: string[]
-  dueDate?: string
-}
-
 export default function NotionTasks({ isOpen, onClose, onTaskSelect }: NotionTasksProps) {
-  const [tasks, setTasks] = useState<NotionTask[]>([])
-  const [filteredTasks, setFilteredTasks] = useState<NotionTask[]>([])
+  const [tasks, setTasks] = useState<NotionTaskItem[]>([])
   const [searchQuery, setSearchQuery] = useState("")
+  const [debouncedQuery, setDebouncedQuery] = useState("")
   const [selectedDatabase, setSelectedDatabase] = useState<string>("all")
   const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [databaseMeta, setDatabaseMeta] = useState<{ id: string; title: string } | null>(null)
+  const [lastQuery, setLastQuery] = useState("")
+  const [activeTab, setActiveTab] = useState<"tasks" | "databases">("tasks")
 
-  // Mock Notion databases
-  const databases = [
-    { id: "all", name: "All Databases" },
-    { id: "projects", name: "Projects" },
-    { id: "tasks", name: "Personal Tasks" },
-    { id: "work", name: "Work Items" },
-    { id: "learning", name: "Learning Goals" },
-  ]
-
-  // Mock Notion tasks
-  const mockTasks: NotionTask[] = [
-    {
-      id: "notion-1",
-      title: "Complete Q1 Project Proposal",
-      description: "Finalize the project proposal document with budget and timeline",
-      status: "In Progress",
-      priority: "High",
-      database: "projects",
-      url: "https://notion.so/project-1",
-      color: "bg-red-500",
-      tags: ["urgent", "proposal", "Q1"],
-      dueDate: "2024-01-15",
-    },
-    {
-      id: "notion-2",
-      title: "Review Design System Updates",
-      description: "Review and approve the latest design system component updates",
-      status: "To Do",
-      priority: "Medium",
-      database: "work",
-      url: "https://notion.so/design-review",
-      color: "bg-purple-500",
-      tags: ["design", "review", "components"],
-    },
-    {
-      id: "notion-3",
-      title: "Learn React Server Components",
-      description: "Study and practice React Server Components implementation",
-      status: "To Do",
-      priority: "Low",
-      database: "learning",
-      url: "https://notion.so/learning-rsc",
-      color: "bg-blue-500",
-      tags: ["react", "learning", "server-components"],
-    },
-    {
-      id: "notion-4",
-      title: "Update API Documentation",
-      description: "Update the API documentation with new endpoints and examples",
-      status: "To Do",
-      priority: "Medium",
-      database: "work",
-      url: "https://notion.so/api-docs",
-      color: "bg-green-500",
-      tags: ["documentation", "api", "technical"],
-    },
-    {
-      id: "notion-5",
-      title: "Plan Team Retrospective",
-      description: "Organize and plan the quarterly team retrospective meeting",
-      status: "To Do",
-      priority: "High",
-      database: "work",
-      url: "https://notion.so/retrospective",
-      color: "bg-orange-500",
-      tags: ["meeting", "team", "retrospective"],
-      dueDate: "2024-01-20",
-    },
-    {
-      id: "notion-6",
-      title: "Organize Home Office",
-      description: "Declutter and reorganize the home office workspace",
-      status: "To Do",
-      priority: "Low",
-      database: "tasks",
-      url: "https://notion.so/home-office",
-      color: "bg-gray-500",
-      tags: ["personal", "organization", "workspace"],
-    },
-  ]
-
-  useEffect(() => {
-    // Simulate loading Notion tasks
+  const fetchTasks = useCallback(async (query: string) => {
     setIsLoading(true)
-    setTimeout(() => {
-      setTasks(mockTasks)
-      setFilteredTasks(mockTasks)
+    setError(null)
+    setLastQuery(query)
+    try {
+      const params = new URLSearchParams({ limit: "50" })
+      if (query) params.set("search", query)
+      const res = await fetch(`/api/notion/task-calendar?${params.toString()}`)
+      const data = await res.json()
+
+      if (!res.ok || data.ok === false) {
+        throw new Error(data.error || "Unable to load Notion tasks. Please check your credentials.")
+      }
+
+      setTasks(Array.isArray(data.items) ? data.items : [])
+      setDatabaseMeta(data.database ?? null)
+    } catch (err: any) {
+      setTasks([])
+      setDatabaseMeta(null)
+      setError(err?.message || "Unable to load Notion tasks. Confirm your Notion settings.")
+    } finally {
       setIsLoading(false)
-    }, 1000)
+    }
   }, [])
 
   useEffect(() => {
-    let filtered = tasks
+    if (!isOpen) return
+    setTasks([])
+    setSelectedDatabase("all")
+    setSearchQuery("")
+    setError(null)
+    setDatabaseMeta(null)
+    setLastQuery("")
+  }, [isOpen])
 
-    // Filter by database
-    if (selectedDatabase !== "all") {
-      filtered = filtered.filter((task) => task.database === selectedDatabase)
+  useEffect(() => {
+    const timeout = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 400)
+    return () => clearTimeout(timeout)
+  }, [searchQuery])
+
+  useEffect(() => {
+    if (!isOpen) return
+    fetchTasks(debouncedQuery)
+  }, [debouncedQuery, isOpen, fetchTasks])
+
+  const databaseOptions = useMemo(() => {
+    const entries = new Map<string, string>()
+    if (databaseMeta) {
+      entries.set(databaseMeta.id, databaseMeta.title || "Task Calendar")
     }
+    tasks.forEach((task) => {
+      if (task.databaseId) {
+        entries.set(task.databaseId, task.databaseName || "Task Calendar")
+      }
+    })
 
-    // Filter by search query
-    if (searchQuery) {
-      filtered = filtered.filter(
-        (task) =>
-          task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          task.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          task.tags.some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase())),
-      )
-    }
+    return [
+      { id: "all", name: "All tasks" },
+      ...Array.from(entries.entries()).map(([id, name]) => ({ id, name })),
+    ]
+  }, [databaseMeta, tasks])
 
-    setFilteredTasks(filtered)
-  }, [tasks, selectedDatabase, searchQuery])
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((task) => selectedDatabase === "all" || task.databaseId === selectedDatabase)
+  }, [tasks, selectedDatabase])
 
-  const refreshTasks = () => {
-    setIsLoading(true)
-    // Simulate API call
-    setTimeout(() => {
-      setIsLoading(false)
-    }, 1000)
+  const handleTaskApply = (task: NotionTaskItem) => {
+    const color = colorFromNotionTask(task)
+    onTaskSelect({
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      status: task.status?.name,
+      priority: task.priority,
+      tags: task.tags,
+      url: task.url,
+      dueDate: task.dueDate,
+      type: "notion",
+      source: "notion",
+      color,
+    })
   }
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority.toLowerCase()) {
-      case "high":
-        return "destructive"
-      case "medium":
-        return "default"
-      case "low":
-        return "secondary"
-      default:
-        return "outline"
-    }
-  }
-
-  const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
-      case "in progress":
-        return "bg-yellow-100 text-yellow-800"
-      case "to do":
-        return "bg-blue-100 text-blue-800"
-      case "done":
-        return "bg-green-100 text-green-800"
-      default:
-        return "bg-gray-100 text-gray-800"
-    }
-  }
+  const refreshTasks = () => fetchTasks(lastQuery)
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[80vh]">
+      <DialogContent className="max-w-5xl max-h-[85vh]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Database className="h-5 w-5" />
@@ -191,127 +125,156 @@ export default function NotionTasks({ isOpen, onClose, onTaskSelect }: NotionTas
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Controls */}
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <Input
                 placeholder="Search tasks..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
+                className="pl-9"
               />
             </div>
             <div className="flex gap-2">
               <select
+                className="border rounded-md px-3 py-2 text-sm"
                 value={selectedDatabase}
                 onChange={(e) => setSelectedDatabase(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-md text-sm"
               >
-                {databases.map((db) => (
+                {databaseOptions.map((db) => (
                   <option key={db.id} value={db.id}>
                     {db.name}
                   </option>
                 ))}
               </select>
-              <Button
-                onClick={refreshTasks}
-                variant="outline"
-                size="sm"
-                disabled={isLoading}
-                className="flex items-center gap-2 bg-transparent"
-              >
+              <Button variant="outline" onClick={refreshTasks} disabled={isLoading} className="flex items-center gap-2">
                 <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
                 Refresh
               </Button>
             </div>
           </div>
 
-          {/* Tasks List */}
-          <div className="space-y-3 max-h-96 overflow-y-auto">
-            {isLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="flex items-center gap-2">
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                  <span>Loading Notion tasks...</span>
-                </div>
-              </div>
-            ) : filteredTasks.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
-                {searchQuery || selectedDatabase !== "all"
-                  ? "No tasks found matching your criteria"
-                  : "No tasks available"}
-              </div>
-            ) : (
-              filteredTasks.map((task) => (
-                <Card key={task.id} className="cursor-pointer hover:shadow-md transition-shadow">
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-medium">{task.title}</h3>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              window.open(task.url, "_blank")
-                            }}
-                          >
-                            <ExternalLink className="h-3 w-3" />
-                          </Button>
-                        </div>
-                        <p className="text-sm text-gray-600">{task.description}</p>
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription className="flex items-center gap-2">
+                <Info className="h-4 w-4" />
+                {error}
+              </AlertDescription>
+            </Alert>
+          )}
 
-                        <div className="flex flex-wrap gap-2">
-                          <Badge variant="outline" className={getStatusColor(task.status)}>
-                            {task.status}
-                          </Badge>
-                          <Badge variant={getPriorityColor(task.priority)}>{task.priority}</Badge>
-                          <Badge variant="outline">{databases.find((db) => db.id === task.database)?.name}</Badge>
+          <Tabs value={activeTab} onValueChange={(val) => setActiveTab(val as any)}>
+            <TabsList>
+              <TabsTrigger value="tasks">Tasks</TabsTrigger>
+              <TabsTrigger value="databases">Database</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="tasks" className="space-y-3">
+              {isLoading && (
+                <div className="flex items-center gap-2 text-sm text-gray-600">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading tasks...
+                </div>
+              )}
+
+              {!isLoading && filteredTasks.length === 0 && !error && (
+                <Card>
+                  <CardContent className="py-6 text-center text-sm text-gray-600">
+                    {searchQuery ? "No tasks match this search." : "No tasks found in your Task Calendar."}
+                  </CardContent>
+                </Card>
+              )}
+
+              {filteredTasks.map((task) => (
+                <Card key={task.id} className="shadow-sm border border-gray-100">
+                  <CardContent className="py-4">
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <div className="font-semibold text-gray-900 flex items-center gap-2">
+                            {task.title}
+                            <a
+                              href={task.url}
+                              className="text-blue-600 hover:underline"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Open in Notion"
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                            </a>
+                          </div>
+                          {task.description && (
+                            <p className="text-sm text-gray-600 line-clamp-2">{task.description}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {task.status && (
+                            <span className={`text-xs px-2 py-1 rounded-full ${statusBadgeClass(task.status)}`}>
+                              {task.status.name}
+                            </span>
+                          )}
+                          {task.priority && (
+                            <Badge variant="outline" className="text-xs capitalize">
+                              {task.priority}
+                            </Badge>
+                          )}
                           {task.dueDate && (
-                            <Badge variant="outline" className="text-orange-600">
-                              Due: {new Date(task.dueDate).toLocaleDateString()}
+                            <Badge variant="secondary" className="text-xs">
+                              Due {new Date(task.dueDate).toLocaleDateString()}
                             </Badge>
                           )}
                         </div>
-
-                        <div className="flex flex-wrap gap-1">
-                          {task.tags.map((tag) => (
-                            <span key={tag} className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded">
-                              #{tag}
-                            </span>
-                          ))}
-                        </div>
                       </div>
 
-                      <Button
-                        onClick={() =>
-                          onTaskSelect({
-                            ...task,
-                            type: "notion",
-                          })
-                        }
-                        className="ml-4"
-                      >
-                        Select
-                      </Button>
+                      {task.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {task.tags.map((tag) => (
+                            <Badge key={tag} variant="outline" className="text-xs">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                        <div className="text-xs text-gray-500">
+                          Last edited {task.lastEditedTime ? new Date(task.lastEditedTime).toLocaleString() : "recently"}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="secondary"
+                            className="flex items-center gap-2"
+                            onClick={() => handleTaskApply(task)}
+                          >
+                            <ChevronRight className="h-4 w-4" />
+                            Assign to block
+                          </Button>
+                        </div>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
-              ))
-            )}
-          </div>
+              ))}
+            </TabsContent>
 
-          {/* Connection Status */}
-          <div className="flex items-center justify-between text-sm text-gray-500 pt-4 border-t">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-              <span>Connected to Notion</span>
-            </div>
-            <span>{filteredTasks.length} tasks available</span>
-          </div>
+            <TabsContent value="databases">
+              <Card>
+                <CardContent className="py-6 space-y-3">
+                  <div className="text-sm text-gray-700">
+                    {databaseMeta ? (
+                      <>
+                        <div className="font-medium">Connected database</div>
+                        <div>{databaseMeta.title || databaseMeta.id}</div>
+                        <div className="text-xs text-gray-500">ID: {databaseMeta.id}</div>
+                      </>
+                    ) : (
+                      <p>No Notion database metadata available. Add your credentials in Settings.</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
       </DialogContent>
     </Dialog>
