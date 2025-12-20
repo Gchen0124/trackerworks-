@@ -10,16 +10,16 @@ export function getNotionCredentials() {
   try {
     const row = sqlite.prepare(`SELECT notion_token, notion_daily_ritual_db_id, notion_task_cal_db_id FROM user_settings WHERE id = 1`).get() as any
     return {
-      token: row?.notion_token || process.env.NOTION_TOKEN || "",
-      dailyRitualDbId: row?.notion_daily_ritual_db_id || process.env.NOTION_DAILY_RITUAL_DB_ID || "",
-      taskCalDbId: row?.notion_task_cal_db_id || process.env.NOTION_TASK_CAL_DB_ID || "",
+      token: row?.notion_token || process.env.NOTION_API_KEY || process.env.NOTION_TOKEN || "",
+      dailyRitualDbId: row?.notion_daily_ritual_db_id || process.env.NOTION_DAILY_RITUAL_DB || process.env.NOTION_DAILY_RITUAL_DB_ID || "",
+      taskCalDbId: row?.notion_task_cal_db_id || process.env.NOTION_TASK_CALENDAR_DB || process.env.NOTION_TASK_CAL_DB_ID || "",
     }
   } catch (error) {
     // Fallback to env variables if database read fails
     return {
-      token: process.env.NOTION_TOKEN || "",
-      dailyRitualDbId: process.env.NOTION_DAILY_RITUAL_DB_ID || "",
-      taskCalDbId: process.env.NOTION_TASK_CAL_DB_ID || "",
+      token: process.env.NOTION_API_KEY || process.env.NOTION_TOKEN || "",
+      dailyRitualDbId: process.env.NOTION_DAILY_RITUAL_DB || process.env.NOTION_DAILY_RITUAL_DB_ID || "",
+      taskCalDbId: process.env.NOTION_TASK_CALENDAR_DB || process.env.NOTION_TASK_CAL_DB_ID || "",
     }
   }
 }
@@ -27,7 +27,10 @@ export function getNotionCredentials() {
 // Create Notion client with credentials
 export function getNotionClient() {
   const { token } = getNotionCredentials()
-  return new Client({ auth: token })
+  return new Client({
+    auth: token,
+    notionVersion: '2025-09-03',
+  })
 }
 
 // Legacy exports for backwards compatibility

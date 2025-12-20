@@ -43,8 +43,9 @@ export async function GET(_req: NextRequest) {
   }
 
   try {
-    const res = await notion.databases.query({
-      database_id: credentials.dailyRitualDbId,
+    // Use dataSources.query for Notion client v5+
+    const res = await (notion as any).dataSources.query({
+      data_source_id: credentials.dailyRitualDbId,
       page_size: 50,
       sorts: [
         { timestamp: "last_edited_time", direction: "descending" },

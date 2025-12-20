@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useCallback, useEffect, useMemo, useState, useRef } from "react"
+import React, { useCallback, useEffect, useMemo, useState, useRef, useLayoutEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -16,9 +16,19 @@ interface ItemRow {
   is_completed?: boolean
   depth_level?: number
   priority?: number
+  source?: "local" | "notion" // Track if item is from Notion
+  notionStatus?: string // Original Notion status name
+  hasSubitems?: boolean // Track if item has subitems
 }
 
 type GoalKey = "goal1" | "goal2" | "goal3"
+
+// Notion goal IDs (Task Calendar page IDs for Goal 1, 2, 3)
+interface NotionGoalIds {
+  goal1: string | null
+  goal2: string | null
+  goal3: string | null
+}
 
 interface NestedTodosPanelProps {
   open: boolean
@@ -27,8 +37,15 @@ interface NestedTodosPanelProps {
 
 export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPanelProps) {
   const [goals, setGoals] = useState<string[]>(["", "", ""]) // [goal1, goal2, goal3]
+  const [notionGoalIds, setNotionGoalIds] = useState<NotionGoalIds>({ goal1: null, goal2: null, goal3: null })
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [tree, setTree] = useState<Record<string, ItemRow[]>>({}) // key = `${goalKey}|${parentId||"root"}`
+  const treeRef = useRef<Record<string, ItemRow[]>>({}) // ref to avoid stale closure issues
+
+  // Keep treeRef in sync with tree state
+  useEffect(() => {
+    treeRef.current = tree
+  }, [tree])
   const [loading, setLoading] = useState<Record<string, boolean>>({})
   const [refreshKey, setRefreshKey] = useState(0)
   const [notes, setNotes] = useState<string>("")
@@ -38,9 +55,11 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
   // Track which goals are expanded/collapsed
   const [goalExpanded, setGoalExpanded] = useState<Record<string, boolean>>({
     goal1: true,
-    goal2: true, 
+    goal2: true,
     goal3: true
   })
+  // Track Notion sync state
+  const [notionSyncing, setNotionSyncing] = useState<Record<string, boolean>>({})
 
   // Local done state persisted in localStorage
   const STORAGE_KEY = "nestedTodosDone:v1"
@@ -217,39 +236,92 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
   }, [])
 
   const isChecked = useCallback((item: ItemRow) => Boolean(item.is_completed), [])
-  const setChecked = useCallback(async (id: string, checked: boolean, element?: Element | null) => {
-    // Update database
-    try {
-      const res = await fetch('/api/local/breakdown', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: [{ id, is_completed: checked }] })
+  const setChecked = useCallback(async (id: string, checked: boolean, element?: Element | null, item?: ItemRow) => {
+    // Update local state optimistically first
+    setTree(prev => {
+      const updated = { ...prev }
+      Object.keys(updated).forEach(key => {
+        updated[key] = updated[key].map(treeItem =>
+          treeItem.id === id ? { ...treeItem, is_completed: checked } : treeItem
+        )
       })
-      if (!res.ok) throw new Error('Failed to update completion status')
-      
-      // Trigger confetti celebration when marking as complete
-      if (checked) {
-        celebrateTaskCompletion(element, false) // Individual task completion
+      return updated
+    })
+
+    // Trigger confetti celebration when marking as complete
+    if (checked) {
+      celebrateTaskCompletion(element, false) // Individual task completion
+    }
+
+    // Determine if this is a Notion item or local item
+    const isNotionItem = item?.source === "notion"
+
+    try {
+      if (isNotionItem) {
+        // Update status in Notion
+        // Map: unchecked = "not_started", checked = "done"
+        setNotionSyncing(prev => ({ ...prev, [id]: true }))
+        const notionRes = await fetch('/api/notion/task-calendar/status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            taskId: id,
+            status: checked ? "done" : "not_started"
+          })
+        })
+        if (!notionRes.ok) {
+          console.error('Failed to update Notion task status')
+        }
+        setNotionSyncing(prev => ({ ...prev, [id]: false }))
+      } else {
+        // Update local database
+        const res = await fetch('/api/local/breakdown', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: [{ id, is_completed: checked }] })
+        })
+        if (!res.ok) throw new Error('Failed to update completion status')
       }
-      
-      // Update local state optimistically
+    } catch (e) {
+      console.error('Failed to update task completion:', e)
+      // Revert optimistic update on error
       setTree(prev => {
         const updated = { ...prev }
         Object.keys(updated).forEach(key => {
-          updated[key] = updated[key].map(item => 
-            item.id === id ? { ...item, is_completed: checked } : item
+          updated[key] = updated[key].map(treeItem =>
+            treeItem.id === id ? { ...treeItem, is_completed: !checked } : treeItem
           )
         })
         return updated
       })
-    } catch (e) {
-      console.error('Failed to update task completion:', e)
     }
   }, [celebrateTaskCompletion])
 
-  // Load today's goals
+  // Load today's goals (including Notion goal IDs for fetching subtasks)
   const loadGoals = useCallback(async () => {
     try {
+      // First try to get goals from Notion (which includes goalIds)
+      try {
+        const notionRes = await fetch(`/api/goals?date=${dateStr}`)
+        if (notionRes.ok) {
+          const notionData = await notionRes.json()
+          if (notionData?.goalIds) {
+            setNotionGoalIds({
+              goal1: notionData.goalIds[0] || null,
+              goal2: notionData.goalIds[1] || null,
+              goal3: notionData.goalIds[2] || null,
+            })
+          }
+          if (notionData?.goals) {
+            setGoals([notionData.goals[0] || "", notionData.goals[1] || "", notionData.goals[2] || ""])
+            return // Use Notion data
+          }
+        }
+      } catch (notionErr) {
+        console.warn("Failed to fetch goals from Notion:", notionErr)
+      }
+
+      // Fallback to local goals
       const qs = new URLSearchParams()
       qs.set("date", dateStr)
       const res = await fetch(`/api/local/goals?${qs.toString()}`)
@@ -330,9 +402,17 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
   useEffect(() => {
     const onDailyGoalsUpdated = (e: Event) => {
       try {
-        const detail = (e as CustomEvent).detail as { goals?: string[] }
+        const detail = (e as CustomEvent).detail as { goals?: string[]; goalIds?: (string | null)[] }
         if (detail?.goals && Array.isArray(detail.goals)) {
           setGoals([detail.goals[0] || "", detail.goals[1] || "", detail.goals[2] || ""])
+        }
+        // Also update goalIds if available (for Notion sync)
+        if (detail?.goalIds && Array.isArray(detail.goalIds)) {
+          setNotionGoalIds({
+            goal1: detail.goalIds[0] || null,
+            goal2: detail.goalIds[1] || null,
+            goal3: detail.goalIds[2] || null,
+          })
         }
       } catch {}
     }
@@ -383,9 +463,17 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
   useEffect(() => {
     const onDailyGoalsUpdated = (e: Event) => {
       try {
-        const detail = (e as CustomEvent).detail as { goals?: string[] }
+        const detail = (e as CustomEvent).detail as { goals?: string[]; goalIds?: (string | null)[] }
         if (detail?.goals && Array.isArray(detail.goals)) {
           setGoals([detail.goals[0] || "", detail.goals[1] || "", detail.goals[2] || ""])
+        }
+        // Also update goalIds if available (for Notion sync)
+        if (detail?.goalIds && Array.isArray(detail.goalIds)) {
+          setNotionGoalIds({
+            goal1: detail.goalIds[0] || null,
+            goal2: detail.goalIds[1] || null,
+            goal3: detail.goalIds[2] || null,
+          })
         }
       } catch {}
     }
@@ -399,11 +487,74 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     }
   }, [])
 
-  // Load list for a goal + parent
+  // Load list for a goal + parent (now supports Notion subitems)
   const loadList = useCallback(async (goalKey: GoalKey, parentId: string | null) => {
     const k = keyFor(goalKey, parentId)
     setLoading(prev => ({ ...prev, [k]: true }))
+
     try {
+      // Get the Notion goal ID for this goal
+      const notionGoalId = notionGoalIds[goalKey]
+
+      // If we have a Notion goal ID and this is the root level (parentId is null),
+      // fetch subitems from Notion first
+      if (notionGoalId && parentId === null) {
+        try {
+          const notionRes = await fetch(`/api/notion/task-calendar/subitems?parentId=${notionGoalId}`)
+          if (notionRes.ok) {
+            const notionData = await notionRes.json()
+            // Even if items is empty, set it - don't fall through to local
+            // This shows "No items yet" when the Notion task has no subitems
+            const rows: ItemRow[] = (notionData?.items || []).map((r: any, i: number) => ({
+              id: r.id,
+              title: r.title || "",
+              order_index: i,
+              is_completed: r.status === "done",
+              depth_level: 0,
+              priority: 1,
+              source: "notion" as const,
+              notionStatus: r.notionStatus,
+              hasSubitems: r.hasSubitems,
+            }))
+            setTree(prev => ({ ...prev, [k]: rows }))
+            setLoading(prev => ({ ...prev, [k]: false }))
+            return // Use Notion data (even if empty)
+          }
+        } catch (notionErr) {
+          console.warn("Failed to fetch subitems from Notion:", notionErr)
+          // Fall through to local on error
+        }
+      }
+
+      // If parentId is a Notion ID (from Notion subitems), fetch its children from Notion
+      if (parentId && treeRef.current[keyFor(goalKey, null)]?.some(item => item.id === parentId && item.source === "notion")) {
+        try {
+          const notionRes = await fetch(`/api/notion/task-calendar/subitems?parentId=${parentId}`)
+          if (notionRes.ok) {
+            const notionData = await notionRes.json()
+            // Even if empty, set the tree and return
+            const rows: ItemRow[] = (notionData?.items || []).map((r: any, i: number) => ({
+              id: r.id,
+              title: r.title || "",
+              order_index: i,
+              is_completed: r.status === "done",
+              depth_level: 1,
+              priority: 1,
+              source: "notion" as const,
+              notionStatus: r.notionStatus,
+              hasSubitems: r.hasSubitems,
+            }))
+            setTree(prev => ({ ...prev, [k]: rows }))
+            setLoading(prev => ({ ...prev, [k]: false }))
+            return // Use Notion data (even if empty)
+          }
+        } catch (notionErr) {
+          console.warn("Failed to fetch nested subitems from Notion:", notionErr)
+          // Fall through to local on error
+        }
+      }
+
+      // Fallback to local breakdown items (only if Notion was not used or failed)
       const qs = new URLSearchParams()
       qs.set("goalId", goalIdFor(goalKey))
       if (parentId) qs.set("parentId", parentId)
@@ -411,21 +562,23 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
       const res = await fetch(`/api/local/breakdown?${qs.toString()}`)
       if (!res.ok) throw new Error("load_list_failed")
       const data = await res.json()
-      const rows: ItemRow[] = (data?.items || []).map((r: any, i: number) => ({ 
-        id: r.id, 
-        title: r.title || "", 
+      const rows: ItemRow[] = (data?.items || []).map((r: any, i: number) => ({
+        id: r.id,
+        title: r.title || "",
         order_index: r.order_index ?? i,
         is_completed: Boolean(r.is_completed),
         depth_level: r.depth_level ?? 0,
-        priority: r.priority ?? 1
+        priority: r.priority ?? 1,
+        source: "local" as const,
       }))
       setTree(prev => ({ ...prev, [k]: rows }))
     } catch (e) {
-      // keep previous
+      // On error, set empty array to stop loading indicator
+      setTree(prev => ({ ...prev, [k]: prev[k] || [] }))
     } finally {
       setLoading(prev => ({ ...prev, [k]: false }))
     }
-  }, [goalIdFor, keyFor])
+  }, [goalIdFor, keyFor, notionGoalIds])
 
   // Save children for a parent list
   const saveChildren = useCallback(async (goalKey: GoalKey, parentId: string | null, items: Array<{ id?: string; title: string; order_index?: number }>) => {
@@ -444,7 +597,11 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     if (!res.ok) throw new Error('delete_failed')
   }, [])
 
-  // Load root lists when panel opens or when goals are expanded
+  // Track previous notionGoalIds to detect changes
+  const prevNotionGoalIdsRef = useRef<NotionGoalIds>({ goal1: null, goal2: null, goal3: null })
+
+  // Load root lists when panel opens or goals are expanded
+  // Note: We use refreshKey to manually trigger reloads, not notionGoalIds to avoid infinite loops
   useEffect(() => {
     if (!open) return
     ;(['goal1','goal2','goal3'] as GoalKey[]).forEach((gk) => {
@@ -452,7 +609,36 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
         loadList(gk, null)
       }
     })
-  }, [open, loadList, refreshKey, goalExpanded])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, refreshKey, goalExpanded])
+
+  // Reload specific goal's items when its notionGoalId changes (e.g., user selects a new task)
+  useEffect(() => {
+    if (!open) return
+    const prev = prevNotionGoalIdsRef.current
+    ;(['goal1','goal2','goal3'] as GoalKey[]).forEach((gk) => {
+      // Only reload if this specific goal's ID changed and it now has a value
+      if (notionGoalIds[gk] !== prev[gk] && notionGoalIds[gk]) {
+        // Clear old tree data for this goal before loading new data
+        setTree(prevTree => {
+          const newTree = { ...prevTree }
+          // Remove all keys that belong to this goal (root and any nested items)
+          Object.keys(newTree).forEach(k => {
+            if (k.startsWith(`${gk}:`)) {
+              delete newTree[k]
+            }
+          })
+          return newTree
+        })
+        // Load new data (regardless of whether goal is expanded - it will show when expanded)
+        if (goalExpanded[gk]) {
+          loadList(gk, null)
+        }
+      }
+    })
+    prevNotionGoalIdsRef.current = { ...notionGoalIds }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notionGoalIds, open, goalExpanded, keyFor])
 
   // Helpers
   const labelForIndex = (i: number) => goals[i] || `Goal ${i + 1}`
@@ -677,7 +863,7 @@ function List({
   updateTitle: (id: string, title: string) => Promise<void>
   deleteItem: (id: string) => Promise<void>
   isChecked: (item: ItemRow) => boolean
-  setChecked: (id: string, v: boolean, element?: Element | null) => Promise<void>
+  setChecked: (id: string, v: boolean, element?: Element | null, item?: ItemRow) => Promise<void>
   pendingEdits: Record<string, string>
   setPendingEdits: React.Dispatch<React.SetStateAction<Record<string, string>>>
   nextTask?: { goalKey: GoalKey; taskId: string } | null
@@ -799,7 +985,7 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
   onRename: (id: string, title: string) => Promise<void>
   onDelete: (id: string) => Promise<void>
   isChecked: (item: ItemRow) => boolean
-  setChecked: (id: string, v: boolean, element?: Element | null) => Promise<void>
+  setChecked: (id: string, v: boolean, element?: Element | null, item?: ItemRow) => Promise<void>
   pendingEdits: Record<string, string>
   setPendingEdits: React.Dispatch<React.SetStateAction<Record<string, string>>>
   setTree: React.Dispatch<React.SetStateAction<Record<string, ItemRow[]>>>
@@ -875,7 +1061,7 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
           checked={checked as any}
           onCheckedChange={(v) => {
             const checkbox = document.activeElement as Element
-            setChecked(item.id, Boolean(v), checkbox)
+            setChecked(item.id, Boolean(v), checkbox, item)
           }}
           className={`mt-1 border-zinc-400 bg-transparent rounded-md data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 ${
             isNextTask && !checked ? 'next-task-checkbox' : ''
@@ -898,10 +1084,18 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
             placeholder="Untitled"
           />
         </div>
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <Button size="icon" variant="ghost" className="text-zinc-400 hover:text-red-400" onClick={() => onDelete(item.id)} title="Delete">
-            <Trash2 className="w-4 h-4" />
-          </Button>
+        <div className="flex items-center gap-1">
+          {/* Notion badge indicator */}
+          {item.source === "notion" && (
+            <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded" title="Synced with Notion">
+              N
+            </span>
+          )}
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button size="icon" variant="ghost" className="text-zinc-400 hover:text-red-400" onClick={() => onDelete(item.id)} title="Delete">
+              <Trash2 className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       </div>
       {expanded && (

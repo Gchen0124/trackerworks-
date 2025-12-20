@@ -13,6 +13,7 @@ interface GoalsResponse {
   date: string
   weeklyGoal: string
   goals: string[] // [g1,g2,g3]
+  goalIds?: (string | null)[] // Notion page IDs for [g1,g2,g3]
   pageId?: string
   source: "notion" | "local"
   // New high-level goals (local-first; Notion optional)
@@ -32,12 +33,15 @@ export default function DailyGoals() {
   const [error, setError] = useState<string | null>(null)
   const [weeklyGoal, setWeeklyGoal] = useState("")
   const [goals, setGoals] = useState<string[]>(["", "", ""]) // 3 goals
+  const [goalIds, setGoalIds] = useState<(string | null)[]>([null, null, null]) // Notion page IDs for goals
   const [dateStr, setDateStr] = useState<string>(() => new Date().toISOString().slice(0, 10))
   const [source, setSource] = useState<"notion" | "local">("local")
+  const [notionPageId, setNotionPageId] = useState<string | null>(null) // Daily Ritual page ID
   const [pickerOpenFor, setPickerOpenFor] = useState<number | null>(null)
   const [tcLoading, setTcLoading] = useState(false)
   const [tcItems, setTcItems] = useState<Array<{ id: string; title: string; url?: string; lastEdited?: string }>>([])
   const [tcSearch, setTcSearch] = useState("")
+  const [syncing, setSyncing] = useState(false) // Track Notion sync state
   // New high-level goals state
   const [excitingGoal, setExcitingGoal] = useState("")
   const [eoyGoal, setEoyGoal] = useState("")
@@ -75,11 +79,33 @@ export default function DailyGoals() {
     setError(null)
 
     try {
-      // 1) Try local DB first for today's date
+      // 1) Try Notion first to get goals with IDs (for two-way sync)
+      let notionData: GoalsResponse | null = null
+      try {
+        const notionRes = await fetch(`/api/goals?date=${dateStr}`)
+        if (notionRes.ok) {
+          notionData = await notionRes.json()
+          // Store goalIds from Notion
+          if (notionData?.goalIds) {
+            setGoalIds(notionData.goalIds)
+          }
+          if (notionData?.pageId) {
+            setNotionPageId(notionData.pageId)
+          }
+        }
+      } catch (notionErr) {
+        console.warn("Failed to fetch from Notion:", notionErr)
+      }
+
+      // 2) Try local DB for today's date
       let res = await fetch(`/api/local/goals?date=${dateStr}`)
       if (!res.ok) {
-        // 2) Fallback to Notion-backed API
-        res = await fetch(`/api/goals?date=${dateStr}`)
+        // 3) Use Notion data if local failed
+        if (notionData) {
+          res = { ok: true, json: async () => notionData } as any
+        } else {
+          throw new Error("Failed to load goals")
+        }
       }
       if (!res.ok) throw new Error("Failed to load goals")
       const data: GoalsResponse = await res.json()
@@ -118,16 +144,19 @@ export default function DailyGoals() {
         date: finalData.date,
         weeklyGoal: finalData.weeklyGoal || "",
         goals: [finalData.goals?.[0] || "", finalData.goals?.[1] || "", finalData.goals?.[2] || ""],
-        pageId: finalData.pageId,
-        source: "local",
+        goalIds: finalData.goalIds || notionData?.goalIds || [null, null, null],
+        pageId: finalData.pageId || notionData?.pageId,
+        source: notionData ? "notion" : "local",
         excitingGoal: finalData.excitingGoal || "",
         eoyGoal: finalData.eoyGoal || "",
         monthlyGoal: finalData.monthlyGoal || "",
         daysAgo
       }
-      
+
       setWeeklyGoal(filled.weeklyGoal)
       setGoals(filled.goals)
+      if (filled.goalIds) setGoalIds(filled.goalIds)
+      if (filled.pageId) setNotionPageId(filled.pageId)
       setSource(filled.source as any)
       setExcitingGoal(filled.excitingGoal || "")
       setEoyGoal(filled.eoyGoal || "")
@@ -260,7 +289,53 @@ export default function DailyGoals() {
     }
   }
 
-  const applyPicked = (title: string) => {
+  // Sync goals to Notion (two-way sync)
+  // goalIndex: optional - if provided, only update that specific goal in local state
+  const syncGoalsToNotion = async (newGoalIds: (string | null)[], goalIndex?: number) => {
+    try {
+      setSyncing(true)
+      const res = await fetch('/api/goals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: dateStr,
+          goalIds: newGoalIds,
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        // Only update the specific goal that was changed (if goalIndex provided)
+        // This prevents Goal 2/3 from getting populated when only Goal 1 is selected
+        if (goalIndex !== undefined && data.goals && data.goalIds) {
+          // Only update the changed goal's title - keep others as they were
+          setGoals(prev => {
+            const next = [...prev]
+            next[goalIndex] = data.goals[goalIndex] || ""
+            return next
+          })
+          setGoalIds(prev => {
+            const next = [...prev]
+            next[goalIndex] = data.goalIds[goalIndex] || null
+            return next
+          })
+        } else if (data.goals && data.goalIds) {
+          // Full update (if no specific goal index provided)
+          setGoals(data.goals)
+          setGoalIds(data.goalIds)
+        }
+        setSource("notion")
+        console.log("Goals synced to Notion:", data)
+      } else {
+        console.error("Failed to sync goals to Notion")
+      }
+    } catch (err) {
+      console.error("Error syncing goals to Notion:", err)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const applyPicked = async (taskId: string, title: string) => {
     if (pickerOpenFor === null) return
     if (pickerOpenFor === -1) {
       setWeeklyGoal(title)
@@ -271,9 +346,18 @@ export default function DailyGoals() {
     } else if (pickerOpenFor === -4) {
       setMonthlyGoal(title)
     } else {
+      // Goals 0, 1, 2 -> sync to Notion
       const next = [...goals]
       next[pickerOpenFor] = title
       setGoals(next)
+
+      // Update goalIds and sync to Notion
+      const newGoalIds = [...goalIds]
+      newGoalIds[pickerOpenFor] = taskId
+      setGoalIds(newGoalIds)
+
+      // Sync to Notion (two-way sync) - only update the specific goal that changed
+      await syncGoalsToNotion(newGoalIds, pickerOpenFor)
     }
     setPickerOpenFor(null)
   }
@@ -300,13 +384,18 @@ export default function DailyGoals() {
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="border-white/30 text-zinc-700 bg-white/20">{source === "notion" ? "Notion" : "Local"}</Badge>
+            {syncing && (
+              <Badge variant="outline" className="border-green-300 text-green-700 bg-green-100/50">
+                Syncing...
+              </Badge>
+            )}
             {goalsDaysAgo && (
               <Badge variant="outline" className="border-blue-300 text-blue-700 bg-blue-100/50">
                 From {goalsDaysAgo} day{goalsDaysAgo > 1 ? 's' : ''} ago
               </Badge>
             )}
-            <Button size="sm" variant="outline" className="bg-white/30 border-white/40 text-zinc-700 hover:bg-white/50" onClick={fetchGoals} disabled={loading}>
-              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            <Button size="sm" variant="outline" className="bg-white/30 border-white/40 text-zinc-700 hover:bg-white/50" onClick={fetchGoals} disabled={loading || syncing}>
+              <RefreshCw className={`h-4 w-4 ${loading || syncing ? "animate-spin" : ""}`} />
             </Button>
           </div>
         </div>
@@ -531,8 +620,9 @@ export default function DailyGoals() {
                 tcItems.map((it) => (
                   <button
                     key={it.id}
-                    onClick={() => applyPicked(it.title)}
+                    onClick={() => applyPicked(it.id, it.title)}
                     className="w-full text-left p-3 border rounded-md hover:bg-gray-50"
+                    disabled={syncing}
                   >
                     <div className="font-medium text-gray-800">{it.title || "Untitled"}</div>
                     {it.lastEdited && (

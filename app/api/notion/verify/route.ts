@@ -20,15 +20,16 @@ export async function GET(_req: NextRequest) {
   }
 
   try {
+    // Use dataSources API for Notion client v5+
     const [drSchema, tcSchema] = await Promise.all([
-      notion.databases.retrieve({ database_id: credentials.dailyRitualDbId }),
-      notion.databases.retrieve({ database_id: credentials.taskCalDbId }),
+      (notion as any).dataSources.retrieve({ data_source_id: credentials.dailyRitualDbId }),
+      (notion as any).dataSources.retrieve({ data_source_id: credentials.taskCalDbId }),
     ])
 
     // Minimal queries to confirm access
     const [drSample, tcSample] = await Promise.all([
-      notion.databases.query({ database_id: credentials.dailyRitualDbId, page_size: 1 }),
-      notion.databases.query({ database_id: credentials.taskCalDbId, page_size: 1 }),
+      (notion as any).dataSources.query({ data_source_id: credentials.dailyRitualDbId, page_size: 1 }),
+      (notion as any).dataSources.query({ data_source_id: credentials.taskCalDbId, page_size: 1 }),
     ])
 
     const drTitleArr = (drSchema as any)?.title || []

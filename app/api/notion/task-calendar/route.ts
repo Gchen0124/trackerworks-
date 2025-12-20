@@ -175,12 +175,14 @@ export async function GET(req: NextRequest) {
   const pageSize = Math.min(Number(req.nextUrl.searchParams.get("limit") || 50), 100)
 
   try {
-    const databaseSchema = await notion.databases.retrieve({ database_id: credentials.taskCalDbId })
+    // Use dataSources.retrieve for Notion client v5+
+    const databaseSchema = await (notion as any).dataSources.retrieve({ data_source_id: credentials.taskCalDbId })
     const databaseTitle = getDatabaseTitle(databaseSchema)
     const titleProperty = resolveTitlePropertyName(databaseSchema)
 
+    // Use dataSources.query for Notion client v5+
     const query: Record<string, any> = {
-      database_id: credentials.taskCalDbId,
+      data_source_id: credentials.taskCalDbId,
       page_size: pageSize,
       sorts: [{ timestamp: "last_edited_time", direction: "descending" }],
     }
@@ -196,7 +198,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const res = await notion.databases.query(query)
+    const res = await (notion as any).dataSources.query(query)
     const items: NotionTaskItem[] = res.results.map((page: any) =>
       mapPageToTask(page, credentials.taskCalDbId, databaseTitle),
     )

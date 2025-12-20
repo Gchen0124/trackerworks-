@@ -1,6 +1,15 @@
 import { NextRequest } from "next/server"
 import { getNotionClient, getNotionCredentials, DR_PROPS, formatDateYYYYMMDD } from "@/lib/notion"
 
+// Property names for Goal 1, 2, 3 in Daily Ritual database
+// These are relational properties that link to Task Calendar
+// Use DR_PROPS from lib/notion.ts which supports env var overrides
+const GOAL_RELATION_PROPS = {
+  GOAL1: DR_PROPS.GOAL1,  // Default: "Goal 1", can be "✅Goal 1" via env
+  GOAL2: DR_PROPS.GOAL2,  // Default: "Goal 2", can be "✅Goal 2" via env
+  GOAL3: DR_PROPS.GOAL3,  // Default: "Goal 3", can be "✅Goal 3" via env
+}
+
 // Helper to extract plain text from a rich_text or title property
 function richTextToPlain(property: any): string {
   const arr = property?.rich_text || property?.title
@@ -50,7 +59,8 @@ async function getTaskTitle(notionClient: any, pageId: string): Promise<string> 
 // Get the property type for the configured date property (date/title/rich_text)
 async function getDatePropType(notionClient: any, dailyRitualDbId: string): Promise<"date" | "title" | "rich_text" | "unknown"> {
   try {
-    const db: any = await notionClient.databases.retrieve({ database_id: dailyRitualDbId })
+    // Use dataSources API for new Notion client v5+
+    const db: any = await notionClient.dataSources.retrieve({ data_source_id: dailyRitualDbId })
     const prop = db?.properties?.[DR_PROPS.DATE]
     return (prop?.type as any) || "unknown"
   } catch {
@@ -69,11 +79,12 @@ async function findDailyRitualByDate(notionClient: any, dailyRitualDbId: string,
   } else if (propType === "rich_text") {
     filter = { property: DR_PROPS.DATE, rich_text: { equals: dateStr } }
   } else {
-    // Fallback: try title equals
-    filter = { property: DR_PROPS.DATE, title: { equals: dateStr } }
+    // Fallback: try date equals (most common for Daily Ritual)
+    filter = { property: DR_PROPS.DATE, date: { equals: dateStr } }
   }
-  const response = await notionClient.databases.query({
-    database_id: dailyRitualDbId,
+  // Use dataSources.query for new Notion client v5+
+  const response = await notionClient.dataSources.query({
+    data_source_id: dailyRitualDbId,
     filter,
     page_size: 1,
   })
@@ -91,12 +102,13 @@ async function createDailyRitual(notionClient: any, dailyRitualDbId: string, dat
   } else if (propType === "rich_text") {
     properties[DR_PROPS.DATE] = { rich_text: [{ type: "text", text: { content: dateStr } }] }
   } else {
-    // Fallback best-effort to title
-    properties[DR_PROPS.DATE] = { title: [{ type: "text", text: { content: dateStr } }] }
+    // Fallback to date (most common for Daily Ritual)
+    properties[DR_PROPS.DATE] = { date: { start: dateStr } }
   }
   try {
+    // Use data_source_id for new Notion client v5+
     const page = await notionClient.pages.create({
-      parent: { database_id: dailyRitualDbId },
+      parent: { type: 'data_source_id', data_source_id: dailyRitualDbId },
       properties,
     })
     return page as any
@@ -159,11 +171,102 @@ export async function GET(req: NextRequest) {
       date: dateStr,
       weeklyGoal,
       goals: [g1, g2, g3],
+      // Include goal IDs for two-way sync
+      goalIds: [goal1Ids[0] || null, goal2Ids[0] || null, goal3Ids[0] || null],
       pageId: page.id,
       source: "notion",
     })
   } catch (error) {
     console.error("/api/goals GET error", error)
     return new Response(JSON.stringify({ error: "Failed to fetch goals" }), { status: 500 })
+  }
+}
+
+// POST: Update goals in Notion (two-way sync)
+// Body: { date?: string, goalIds?: [string|null, string|null, string|null] }
+// goalIds are Task Calendar page IDs to set as relations for Goal 1, 2, 3
+export async function POST(req: NextRequest) {
+  const credentials = getNotionCredentials()
+  if (!credentials.dailyRitualDbId || !credentials.taskCalDbId) {
+    return new Response(
+      JSON.stringify({ error: "Missing Notion database IDs. Please configure them in settings." }),
+      { status: 500 },
+    )
+  }
+  if (!credentials.token) {
+    return new Response(
+      JSON.stringify({ error: "Missing Notion token. Please configure it in settings." }),
+      { status: 500 },
+    )
+  }
+
+  const notion = getNotionClient()
+  const dailyRitualDbId = credentials.dailyRitualDbId
+
+  try {
+    const body = await req.json()
+    const now = new Date()
+    const dateStr = body?.date || formatDateYYYYMMDD(now)
+    const goalIds: (string | null)[] = body?.goalIds || [null, null, null]
+
+    // Find or create the Daily Ritual page for this date
+    let page = await findDailyRitualByDate(notion, dailyRitualDbId, dateStr)
+    if (!page) {
+      page = await createDailyRitual(notion, dailyRitualDbId, dateStr)
+    }
+
+    // Build the properties update object for Goal 1, 2, 3 relations
+    const properties: any = {}
+
+    // Update ✅Goal 1
+    if (goalIds[0] !== undefined) {
+      properties[GOAL_RELATION_PROPS.GOAL1] = {
+        relation: goalIds[0] ? [{ id: goalIds[0] }] : []
+      }
+    }
+
+    // Update ✅Goal 2
+    if (goalIds[1] !== undefined) {
+      properties[GOAL_RELATION_PROPS.GOAL2] = {
+        relation: goalIds[1] ? [{ id: goalIds[1] }] : []
+      }
+    }
+
+    // Update ✅Goal 3
+    if (goalIds[2] !== undefined) {
+      properties[GOAL_RELATION_PROPS.GOAL3] = {
+        relation: goalIds[2] ? [{ id: goalIds[2] }] : []
+      }
+    }
+
+    // Only update if there are properties to update
+    if (Object.keys(properties).length > 0) {
+      await notion.pages.update({
+        page_id: page.id,
+        properties,
+      })
+    }
+
+    // Fetch updated goal titles to return
+    const [g1, g2, g3] = await Promise.all([
+      goalIds[0] ? getTaskTitle(notion, goalIds[0]) : Promise.resolve(""),
+      goalIds[1] ? getTaskTitle(notion, goalIds[1]) : Promise.resolve(""),
+      goalIds[2] ? getTaskTitle(notion, goalIds[2]) : Promise.resolve(""),
+    ])
+
+    return Response.json({
+      ok: true,
+      date: dateStr,
+      goals: [g1, g2, g3],
+      goalIds: goalIds,
+      pageId: page.id,
+      source: "notion",
+    })
+  } catch (error: any) {
+    console.error("/api/goals POST error", error)
+    return new Response(
+      JSON.stringify({ error: error?.message || "Failed to update goals" }),
+      { status: 500 }
+    )
   }
 }
