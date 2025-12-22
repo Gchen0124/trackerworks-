@@ -580,22 +580,118 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     }
   }, [goalIdFor, keyFor, notionGoalIds])
 
-  // Save children for a parent list
+  // Helper to check if a parentId is a Notion task (not a local item)
+  // Notion IDs are UUIDs, local IDs are typically shorter or have different format
+  const isNotionId = useCallback((id: string | null): boolean => {
+    if (!id) return false
+    // Notion UUIDs are 32 hex chars (with or without dashes)
+    // e.g., "2bdd6707-fb13-8175-b6f3-e15a48a367f1" or "2bdd6707fb138175b6f3e15a48a367f1"
+    const uuidPattern = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i
+    return uuidPattern.test(id)
+  }, [])
+
+  // Get the effective parent ID for Notion operations
+  // For root level items under a goal, use the notionGoalId as parent
+  const getNotionParentId = useCallback((goalKey: GoalKey, parentId: string | null): string | null => {
+    if (parentId) return parentId // If we have a parentId, use it
+    return notionGoalIds[goalKey] // Otherwise use the goal's Notion task ID
+  }, [notionGoalIds])
+
+  // Create a new subtask - uses Notion API if parent is a Notion task
+  const createSubtask = useCallback(async (goalKey: GoalKey, parentId: string | null, title: string): Promise<{ id: string } | null> => {
+    const notionParentId = getNotionParentId(goalKey, parentId)
+
+    console.log('[createSubtask] goalKey:', goalKey, 'parentId:', parentId)
+    console.log('[createSubtask] notionParentId:', notionParentId)
+    console.log('[createSubtask] isNotionId:', notionParentId ? isNotionId(notionParentId) : false)
+
+    if (notionParentId && isNotionId(notionParentId)) {
+      // Create in Notion
+      console.log('[createSubtask] Calling Notion API to create subtask...')
+      const res = await fetch('/api/notion/task-calendar/subitems', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentId: notionParentId, title })
+      })
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}))
+        console.error('[createSubtask] Failed to create subtask:', errorData)
+        throw new Error('Failed to create subtask in Notion')
+      }
+      const data = await res.json()
+      console.log('[createSubtask] Subtask created successfully:', data)
+      return { id: data.item?.id }
+    } else {
+      // Create locally
+      console.log('[createSubtask] Creating locally...')
+      const body = {
+        goalId: goalIdFor(goalKey),
+        parentId: parentId ?? undefined,
+        scopeType: 'task' as const,
+        items: [{ title, order_index: 0 }]
+      }
+      const res = await fetch('/api/local/breakdown', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+      if (!res.ok) throw new Error('save_failed')
+      return null
+    }
+  }, [goalIdFor, getNotionParentId, isNotionId])
+
+  // Save children for a parent list (local only - for backwards compatibility)
   const saveChildren = useCallback(async (goalKey: GoalKey, parentId: string | null, items: Array<{ id?: string; title: string; order_index?: number }>) => {
     const body = { goalId: goalIdFor(goalKey), parentId: parentId ?? undefined, scopeType: 'task' as const, items }
     const res = await fetch('/api/local/breakdown', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     if (!res.ok) throw new Error('save_failed')
   }, [goalIdFor])
 
-  const updateTitle = useCallback(async (id: string, title: string) => {
-    const res = await fetch('/api/local/breakdown', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: [{ id, title }] }) })
-    if (!res.ok) throw new Error('rename_failed')
-  }, [])
+  // Update title - checks if item is from Notion and uses appropriate API
+  const updateTitle = useCallback(async (id: string, title: string, item?: ItemRow) => {
+    const isNotion = item?.source === "notion" || isNotionId(id)
 
-  const deleteItem = useCallback(async (id: string) => {
-    const res = await fetch('/api/local/breakdown', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [id] }) })
-    if (!res.ok) throw new Error('delete_failed')
-  }, [])
+    if (isNotion) {
+      // Update in Notion
+      const res = await fetch('/api/notion/task-calendar/subitems', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId: id, title })
+      })
+      if (!res.ok) throw new Error('Failed to rename task in Notion')
+    } else {
+      // Update locally
+      const res = await fetch('/api/local/breakdown', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ id, title }] })
+      })
+      if (!res.ok) throw new Error('rename_failed')
+    }
+  }, [isNotionId])
+
+  // Delete item - checks if item is from Notion and uses appropriate API
+  const deleteItem = useCallback(async (id: string, item?: ItemRow) => {
+    const isNotion = item?.source === "notion" || isNotionId(id)
+
+    if (isNotion) {
+      // Delete (archive) in Notion
+      const res = await fetch('/api/notion/task-calendar/subitems', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId: id })
+      })
+      if (!res.ok) throw new Error('Failed to delete task in Notion')
+    } else {
+      // Delete locally
+      const res = await fetch('/api/local/breakdown', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [id] })
+      })
+      if (!res.ok) throw new Error('delete_failed')
+    }
+  }, [isNotionId])
 
   // Track previous notionGoalIds to detect changes
   const prevNotionGoalIdsRef = useRef<NotionGoalIds>({ goal1: null, goal2: null, goal3: null })
@@ -619,12 +715,12 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     ;(['goal1','goal2','goal3'] as GoalKey[]).forEach((gk) => {
       // Only reload if this specific goal's ID changed and it now has a value
       if (notionGoalIds[gk] !== prev[gk] && notionGoalIds[gk]) {
-        // Clear old tree data for this goal before loading new data
+        // Clear old tree data for this goal before loading new data (key format is goalKey|parentId)
         setTree(prevTree => {
           const newTree = { ...prevTree }
           // Remove all keys that belong to this goal (root and any nested items)
           Object.keys(newTree).forEach(k => {
-            if (k.startsWith(`${gk}:`)) {
+            if (k.startsWith(`${gk}|`)) {
               delete newTree[k]
             }
           })
@@ -639,6 +735,50 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     prevNotionGoalIdsRef.current = { ...notionGoalIds }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notionGoalIds, open, goalExpanded, keyFor])
+
+  // Listen for goalTaskSelected event from DailyGoals to immediately refresh subtasks
+  useEffect(() => {
+    const handler = (e: Event) => {
+      try {
+        const detail = (e as CustomEvent).detail as { goalKey: GoalKey; taskId: string; title: string }
+        if (!detail?.goalKey || !detail?.taskId) return
+
+        // Update the notionGoalIds with the new taskId immediately
+        setNotionGoalIds(prev => ({
+          ...prev,
+          [detail.goalKey]: detail.taskId
+        }))
+
+        // Clear old tree data for this goal (key format is goalKey|parentId)
+        setTree(prevTree => {
+          const newTree = { ...prevTree }
+          Object.keys(newTree).forEach(k => {
+            if (k.startsWith(`${detail.goalKey}|`)) {
+              delete newTree[k]
+            }
+          })
+          return newTree
+        })
+
+        // If the panel is open and goal is expanded, reload immediately with the new taskId
+        if (open && goalExpanded[detail.goalKey]) {
+          // Small delay to allow state updates to propagate
+          setTimeout(() => {
+            loadList(detail.goalKey, null)
+          }, 150)
+        }
+      } catch {}
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('goalTaskSelected', handler)
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('goalTaskSelected', handler)
+      }
+    }
+  }, [open, goalExpanded, loadList])
 
   // Helpers
   const labelForIndex = (i: number) => goals[i] || `Goal ${i + 1}`
@@ -812,6 +952,7 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
                       setExpanded={setExpanded}
                       loadList={loadList}
                       saveChildren={saveChildren}
+                      createSubtask={createSubtask}
                       updateTitle={updateTitle}
                       deleteItem={deleteItem}
                       isChecked={isChecked}
@@ -819,6 +960,7 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
                       pendingEdits={pendingEdits}
                       setPendingEdits={setPendingEdits}
                       nextTask={getNextUnfinishedItems.nextTask}
+                      notionGoalIds={notionGoalIds}
                     />
                   </div>
                 )}
@@ -842,6 +984,7 @@ function List({
   setExpanded,
   loadList,
   saveChildren,
+  createSubtask,
   updateTitle,
   deleteItem,
   isChecked,
@@ -849,6 +992,7 @@ function List({
   pendingEdits,
   setPendingEdits,
   nextTask,
+  notionGoalIds,
 }: {
   goalKey: GoalKey
   parentId: string | null
@@ -860,26 +1004,85 @@ function List({
   setExpanded: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
   loadList: (goalKey: GoalKey, parentId: string | null) => Promise<void>
   saveChildren: (goalKey: GoalKey, parentId: string | null, items: Array<{ id?: string; title: string; order_index?: number }>) => Promise<void>
-  updateTitle: (id: string, title: string) => Promise<void>
-  deleteItem: (id: string) => Promise<void>
+  createSubtask: (goalKey: GoalKey, parentId: string | null, title: string) => Promise<{ id: string } | null>
+  updateTitle: (id: string, title: string, item?: ItemRow) => Promise<void>
+  deleteItem: (id: string, item?: ItemRow) => Promise<void>
   isChecked: (item: ItemRow) => boolean
   setChecked: (id: string, v: boolean, element?: Element | null, item?: ItemRow) => Promise<void>
   pendingEdits: Record<string, string>
   setPendingEdits: React.Dispatch<React.SetStateAction<Record<string, string>>>
   nextTask?: { goalKey: GoalKey; taskId: string } | null
+  notionGoalIds: NotionGoalIds
 }) {
   const listKey = keyFor(goalKey, parentId)
   const items = tree[listKey]
   const isLoading = !!loading[listKey]
+
+  // State for inline new task input
+  const [isAddingNew, setIsAddingNew] = useState(false)
+  const [newTaskTitle, setNewTaskTitle] = useState("")
+  const [isSavingNew, setIsSavingNew] = useState(false)
+  const newTaskInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!items && !isLoading) loadList(goalKey, parentId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listKey])
 
-  const onAdd = async () => {
-    // Save any pending edits first
-    const pendingUpdates = Object.entries(pendingEdits).map(([id, title]) => ({ id, title }))
+  // Focus the input when it appears
+  useEffect(() => {
+    if (isAddingNew && newTaskInputRef.current) {
+      newTaskInputRef.current.focus()
+    }
+  }, [isAddingNew])
+
+  // Check if we should use Notion API for this list
+  const isNotionContext = (() => {
+    // If we have a Notion goal ID for this goal and parentId is null (root level), use Notion
+    if (notionGoalIds[goalKey] && parentId === null) {
+      return true
+    }
+    // If parentId is a Notion item, use Notion
+    const rootItems = tree[keyFor(goalKey, null)] || []
+    if (parentId && rootItems.some(item => item.id === parentId && item.source === "notion")) {
+      return true
+    }
+    // Check nested items too
+    const currentItems = tree[keyFor(goalKey, parentId)] || []
+    if (currentItems.length > 0 && currentItems[0]?.source === "notion") {
+      return true
+    }
+    return false
+  })()
+
+  // Show the inline input when "Add Task" is clicked
+  const onAddClick = () => {
+    setIsAddingNew(true)
+    setNewTaskTitle("")
+  }
+
+  // Save the new task when user finishes typing (blur or Enter)
+  const saveNewTask = async () => {
+    const title = newTaskTitle.trim()
+
+    // If empty, just cancel
+    if (!title) {
+      setIsAddingNew(false)
+      setNewTaskTitle("")
+      return
+    }
+
+    setIsSavingNew(true)
+
+    // Save any pending local edits first (only for local items)
+    const pendingUpdates = Object.entries(pendingEdits)
+      .filter(([id]) => {
+        const allItems = Object.values(tree).flat()
+        const item = allItems.find(i => i.id === id)
+        return item?.source !== "notion"
+      })
+      .map(([id, title]) => ({ id, title }))
+
     if (pendingUpdates.length > 0) {
       try {
         await fetch('/api/local/breakdown', {
@@ -887,44 +1090,58 @@ function List({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ items: pendingUpdates })
         })
-        setPendingEdits({}) // Clear pending edits after saving
+        setPendingEdits(prev => {
+          const updated = { ...prev }
+          pendingUpdates.forEach(({ id }) => delete updated[id])
+          return updated
+        })
       } catch (e) {
         console.error('Failed to save pending edits:', e)
       }
     }
-    
-    // Get fresh data from the tree (includes both saved and pending edits)
-    const currentItems = tree[keyFor(goalKey, parentId)] || []
-    // Merge in any pending edits to get the most current state
-    const itemsWithPendingEdits = currentItems.map(item => ({
-      ...item,
-      title: pendingEdits[item.id] || item.title
-    }))
-    
+
     try {
-      await saveChildren(goalKey, parentId, [...itemsWithPendingEdits, { 
-        title: parentId ? "New subtask" : "New task", 
-        order_index: itemsWithPendingEdits.length 
-      }])
+      // Use createSubtask for Notion items, saveChildren for local items
+      if (isNotionContext) {
+        await createSubtask(goalKey, parentId, title)
+      } else {
+        // Get fresh data from the tree (includes both saved and pending edits)
+        const currentItems = tree[keyFor(goalKey, parentId)] || []
+        // Merge in any pending edits to get the most current state
+        const itemsWithPendingEdits = currentItems.map(item => ({
+          ...item,
+          title: pendingEdits[item.id] || item.title
+        }))
+
+        await saveChildren(goalKey, parentId, [...itemsWithPendingEdits, {
+          title,
+          order_index: itemsWithPendingEdits.length
+        }])
+      }
+    } catch (err) {
+      console.error('[saveNewTask] Error:', err)
     } finally {
+      setIsAddingNew(false)
+      setNewTaskTitle("")
+      setIsSavingNew(false)
       loadList(goalKey, parentId)
     }
   }
 
-  const onDeleteHere = async (id: string) => {
-    try { await deleteItem(id) } finally { loadList(goalKey, parentId) }
+  const onDeleteHere = async (id: string, item?: ItemRow) => {
+    try { await deleteItem(id, item) } finally { loadList(goalKey, parentId) }
   }
 
   return (
     <div className={parentId ? "ml-4 pl-3 border-l border-zinc-800 space-y-1" : "space-y-1"}>
       <div className="flex items-center justify-between py-1">
         <div className="text-xs text-zinc-400">{parentId ? "Subtasks" : "Tasks"}</div>
-        <Button size="sm" variant="ghost" onClick={onAdd} className="text-zinc-300 hover:text-white">
+        <Button size="sm" variant="ghost" onClick={onAddClick} className="text-zinc-300 hover:text-white" disabled={isAddingNew}>
           <Plus className="w-4 h-4 mr-1" /> Add {parentId ? "subtask" : "task"}
         </Button>
       </div>
       {isLoading && <div className="text-xs text-zinc-400 py-2">Loading…</div>}
-      {!isLoading && (!items || items.length === 0) && (
+      {!isLoading && (!items || items.length === 0) && !isAddingNew && (
         <div className="text-xs text-zinc-500 italic py-2">No items yet.</div>
       )}
       {!isLoading && (items || []).map((it, index) => (
@@ -962,6 +1179,7 @@ function List({
                 setExpanded={setExpanded}
                 loadList={loadList}
                 saveChildren={saveChildren}
+                createSubtask={createSubtask}
                 updateTitle={updateTitle}
                 deleteItem={deleteItem}
                 isChecked={isChecked}
@@ -969,11 +1187,42 @@ function List({
                 pendingEdits={pendingEdits}
                 setPendingEdits={setPendingEdits}
                 nextTask={nextTask}
+                notionGoalIds={notionGoalIds}
               />
             )}
           </TreeNode>
         </div>
       ))}
+      {/* Inline input for new task */}
+      {isAddingNew && (
+        <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-zinc-900/50">
+          <div className="w-4" /> {/* Spacer for alignment with expand icon */}
+          <Checkbox
+            checked={false}
+            disabled
+            className="border-zinc-600 bg-transparent rounded-md opacity-50"
+          />
+          <Input
+            ref={newTaskInputRef}
+            value={newTaskTitle}
+            onChange={(e) => setNewTaskTitle(e.target.value)}
+            onBlur={saveNewTask}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                saveNewTask()
+              } else if (e.key === 'Escape') {
+                setIsAddingNew(false)
+                setNewTaskTitle("")
+              }
+            }}
+            placeholder={parentId ? "Enter subtask name..." : "Enter task name..."}
+            className="flex-1 h-6 bg-zinc-900/60 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 text-sm focus:border-blue-500"
+            disabled={isSavingNew}
+          />
+          {isSavingNew && <span className="text-xs text-zinc-500">Saving...</span>}
+        </div>
+      )}
     </div>
   )
 }
@@ -982,8 +1231,8 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
   item: ItemRow
   expanded: boolean
   onExpand: (id: string) => void
-  onRename: (id: string, title: string) => Promise<void>
-  onDelete: (id: string) => Promise<void>
+  onRename: (id: string, title: string, item?: ItemRow) => Promise<void>
+  onDelete: (id: string, item?: ItemRow) => Promise<void>
   isChecked: (item: ItemRow) => boolean
   setChecked: (id: string, v: boolean, element?: Element | null, item?: ItemRow) => Promise<void>
   pendingEdits: Record<string, string>
@@ -1016,7 +1265,7 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
     }
     try {
       setInputSaving(true)
-      await onRename(item.id, next)
+      await onRename(item.id, next, item)
       // Remove from pending edits after successful save
       setPendingEdits(prev => {
         const updated = { ...prev }
@@ -1092,7 +1341,7 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
             </span>
           )}
           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Button size="icon" variant="ghost" className="text-zinc-400 hover:text-red-400" onClick={() => onDelete(item.id)} title="Delete">
+            <Button size="icon" variant="ghost" className="text-zinc-400 hover:text-red-400" onClick={() => onDelete(item.id, item)} title="Delete">
               <Trash2 className="w-4 h-4" />
             </Button>
           </div>

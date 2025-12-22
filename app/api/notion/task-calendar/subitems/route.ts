@@ -156,8 +156,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Create the new sub-item
+    // Use data_source_id format (required for Notion SDK v5+ / 2025 API)
     const newPage: any = await notion.pages.create({
-      parent: { database_id: credentials.taskCalDbId },
+      parent: { type: 'data_source_id', data_source_id: credentials.taskCalDbId },
       properties: {
         [titlePropertyName]: {
           title: [{ text: { content: title } }]
@@ -166,7 +167,7 @@ export async function POST(req: NextRequest) {
           relation: [{ id: parentId }]
         },
         Status: {
-          status: { name: "Not started" }
+          status: { name: "Not Started" }
         }
       }
     })
@@ -186,6 +187,79 @@ export async function POST(req: NextRequest) {
     console.error("/api/notion/task-calendar/subitems POST error", error)
     return new Response(
       JSON.stringify({ error: error?.message || "Failed to create sub-item" }),
+      { status: 500 }
+    )
+  }
+}
+
+// PATCH: Update a sub-item (rename title)
+// Body: { taskId: string, title: string }
+export async function PATCH(req: NextRequest) {
+  const credentials = getNotionCredentials()
+  if (!credentials.taskCalDbId) {
+    return new Response(
+      JSON.stringify({ error: "Missing Notion Task Calendar database ID. Please configure it in settings." }),
+      { status: 500 },
+    )
+  }
+  if (!credentials.token) {
+    return new Response(
+      JSON.stringify({ error: "Missing Notion token. Please configure it in settings." }),
+      { status: 500 },
+    )
+  }
+
+  const notion = getNotionClient()
+
+  try {
+    const body = await req.json()
+    const taskId: string = body?.taskId
+    const title: string = body?.title
+
+    if (!taskId) {
+      return new Response(
+        JSON.stringify({ error: "Missing taskId" }),
+        { status: 400 }
+      )
+    }
+
+    if (title === undefined) {
+      return new Response(
+        JSON.stringify({ error: "Missing title" }),
+        { status: 400 }
+      )
+    }
+
+    // Get the database schema to find the title property name
+    const dbSchema: any = await (notion as any).dataSources.retrieve({ data_source_id: credentials.taskCalDbId })
+    let titlePropertyName = "Task Plan"
+
+    for (const [name, prop] of Object.entries(dbSchema.properties || {})) {
+      if ((prop as any).type === "title") {
+        titlePropertyName = name
+        break
+      }
+    }
+
+    // Update the page title
+    await notion.pages.update({
+      page_id: taskId,
+      properties: {
+        [titlePropertyName]: {
+          title: [{ text: { content: title } }]
+        }
+      }
+    })
+
+    return Response.json({
+      ok: true,
+      taskId,
+      title
+    })
+  } catch (error: any) {
+    console.error("/api/notion/task-calendar/subitems PATCH error", error)
+    return new Response(
+      JSON.stringify({ error: error?.message || "Failed to update sub-item" }),
       { status: 500 }
     )
   }

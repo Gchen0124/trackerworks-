@@ -183,8 +183,9 @@ export async function GET(req: NextRequest) {
 }
 
 // POST: Update goals in Notion (two-way sync)
-// Body: { date?: string, goalIds?: [string|null, string|null, string|null] }
-// goalIds are Task Calendar page IDs to set as relations for Goal 1, 2, 3
+// Body: { date?: string, goalIndex?: number, goalId?: string, goalIds?: [string|null, string|null, string|null] }
+// If goalIndex is provided, only update that specific goal (0, 1, or 2)
+// Otherwise, goalIds array updates all three goals
 export async function POST(req: NextRequest) {
   const credentials = getNotionCredentials()
   if (!credentials.dailyRitualDbId || !credentials.taskCalDbId) {
@@ -207,7 +208,10 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const now = new Date()
     const dateStr = body?.date || formatDateYYYYMMDD(now)
-    const goalIds: (string | null)[] = body?.goalIds || [null, null, null]
+
+    // Support for updating a single goal by index
+    const goalIndex: number | undefined = body?.goalIndex
+    const singleGoalId: string | null = body?.goalId ?? null
 
     // Find or create the Daily Ritual page for this date
     let page = await findDailyRitualByDate(notion, dailyRitualDbId, dateStr)
@@ -215,27 +219,52 @@ export async function POST(req: NextRequest) {
       page = await createDailyRitual(notion, dailyRitualDbId, dateStr)
     }
 
-    // Build the properties update object for Goal 1, 2, 3 relations
+    // Get current goal IDs from the page to preserve unchanged goals
+    const props = page.properties
+    const currentGoalIds: (string | null)[] = [
+      extractRelationIds(props?.[DR_PROPS.GOAL1])[0] || null,
+      extractRelationIds(props?.[DR_PROPS.GOAL2])[0] || null,
+      extractRelationIds(props?.[DR_PROPS.GOAL3])[0] || null,
+    ]
+
+    // Build the properties update object
     const properties: any = {}
 
-    // Update ✅Goal 1
-    if (goalIds[0] !== undefined) {
-      properties[GOAL_RELATION_PROPS.GOAL1] = {
-        relation: goalIds[0] ? [{ id: goalIds[0] }] : []
-      }
-    }
+    if (goalIndex !== undefined && goalIndex >= 0 && goalIndex <= 2) {
+      // Update only the specific goal
+      const propName = goalIndex === 0 ? GOAL_RELATION_PROPS.GOAL1
+                     : goalIndex === 1 ? GOAL_RELATION_PROPS.GOAL2
+                     : GOAL_RELATION_PROPS.GOAL3
 
-    // Update ✅Goal 2
-    if (goalIds[1] !== undefined) {
-      properties[GOAL_RELATION_PROPS.GOAL2] = {
-        relation: goalIds[1] ? [{ id: goalIds[1] }] : []
+      properties[propName] = {
+        relation: singleGoalId ? [{ id: singleGoalId }] : []
       }
-    }
 
-    // Update ✅Goal 3
-    if (goalIds[2] !== undefined) {
-      properties[GOAL_RELATION_PROPS.GOAL3] = {
-        relation: goalIds[2] ? [{ id: goalIds[2] }] : []
+      // Update the currentGoalIds array for return value
+      currentGoalIds[goalIndex] = singleGoalId
+    } else {
+      // Legacy: Update all goals from goalIds array
+      const goalIds: (string | null)[] = body?.goalIds || [null, null, null]
+
+      if (goalIds[0] !== undefined) {
+        properties[GOAL_RELATION_PROPS.GOAL1] = {
+          relation: goalIds[0] ? [{ id: goalIds[0] }] : []
+        }
+        currentGoalIds[0] = goalIds[0]
+      }
+
+      if (goalIds[1] !== undefined) {
+        properties[GOAL_RELATION_PROPS.GOAL2] = {
+          relation: goalIds[1] ? [{ id: goalIds[1] }] : []
+        }
+        currentGoalIds[1] = goalIds[1]
+      }
+
+      if (goalIds[2] !== undefined) {
+        properties[GOAL_RELATION_PROPS.GOAL3] = {
+          relation: goalIds[2] ? [{ id: goalIds[2] }] : []
+        }
+        currentGoalIds[2] = goalIds[2]
       }
     }
 
@@ -247,18 +276,18 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // Fetch updated goal titles to return
+    // Fetch updated goal titles to return (preserve existing titles for unchanged goals)
     const [g1, g2, g3] = await Promise.all([
-      goalIds[0] ? getTaskTitle(notion, goalIds[0]) : Promise.resolve(""),
-      goalIds[1] ? getTaskTitle(notion, goalIds[1]) : Promise.resolve(""),
-      goalIds[2] ? getTaskTitle(notion, goalIds[2]) : Promise.resolve(""),
+      currentGoalIds[0] ? getTaskTitle(notion, currentGoalIds[0]) : Promise.resolve(""),
+      currentGoalIds[1] ? getTaskTitle(notion, currentGoalIds[1]) : Promise.resolve(""),
+      currentGoalIds[2] ? getTaskTitle(notion, currentGoalIds[2]) : Promise.resolve(""),
     ])
 
     return Response.json({
       ok: true,
       date: dateStr,
       goals: [g1, g2, g3],
-      goalIds: goalIds,
+      goalIds: currentGoalIds,
       pageId: page.id,
       source: "notion",
     })

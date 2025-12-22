@@ -1,11 +1,12 @@
 import { NextRequest } from "next/server"
 import { getNotionClient, getNotionCredentials } from "@/lib/notion"
 
-// Task status mapping:
-// - unchecked (not started) = "Not started" in Notion
-// - checked (done) = "Done" or "Complete" in Notion
+// Task status mapping (based on your Notion database):
+// Status options: "Missing", "Not Started", "In Progress", "Complete"
+// - unchecked (not started) = "Not Started" in Notion
+// - checked (done) = "Complete" in Notion
 
-type TaskStatusValue = "Not started" | "In progress" | "Done" | "Complete"
+type TaskStatusValue = "Not Started" | "In Progress" | "Complete" | "Missing"
 
 // POST: Update task status in Notion Task Calendar
 // Body: { taskId: string, status: "not_started" | "done" }
@@ -45,20 +46,20 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Map our status to Notion status values
+    // Map our status to Notion status values (exact case matters!)
     let notionStatus: TaskStatusValue
     switch (status) {
       case "not_started":
-        notionStatus = "Not started"
+        notionStatus = "Not Started"
         break
       case "in_progress":
-        notionStatus = "In progress"
+        notionStatus = "In Progress"
         break
       case "done":
-        notionStatus = "Done"
+        notionStatus = "Complete"
         break
       default:
-        notionStatus = "Not started"
+        notionStatus = "Not Started"
     }
 
     // Update the task's Status property in Notion

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useRef, useCallback } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -275,10 +275,14 @@ export default function DailyGoals() {
     }
   }, [dateStr])
 
-  const loadTaskCalendar = async () => {
+  // Ref to store debounce timer for real-time search
+  const searchDebounceRef = useRef<NodeJS.Timeout | null>(null)
+
+  const loadTaskCalendar = useCallback(async (searchQuery?: string) => {
+    const query = searchQuery ?? tcSearch
     try {
       setTcLoading(true)
-      const res = await fetch(`/api/notion/task-calendar?limit=50${tcSearch ? `&search=${encodeURIComponent(tcSearch)}` : ""}`)
+      const res = await fetch(`/api/notion/task-calendar?limit=50${query ? `&search=${encodeURIComponent(query)}` : ""}`)
       if (!res.ok) throw new Error("Failed to load Task Calendar")
       const data = await res.json()
       setTcItems(data.items || [])
@@ -287,11 +291,34 @@ export default function DailyGoals() {
     } finally {
       setTcLoading(false)
     }
-  }
+  }, [tcSearch])
 
-  // Sync goals to Notion (two-way sync)
-  // goalIndex: optional - if provided, only update that specific goal in local state
-  const syncGoalsToNotion = async (newGoalIds: (string | null)[], goalIndex?: number) => {
+  // Debounced real-time search: triggers search 300ms after user stops typing
+  useEffect(() => {
+    // Only run when picker is open
+    if (pickerOpenFor === null) return
+
+    // Clear previous timer
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current)
+    }
+
+    // Set new timer to search after 300ms
+    searchDebounceRef.current = setTimeout(() => {
+      loadTaskCalendar(tcSearch)
+    }, 300)
+
+    return () => {
+      if (searchDebounceRef.current) {
+        clearTimeout(searchDebounceRef.current)
+      }
+    }
+  }, [tcSearch, pickerOpenFor])
+
+  // Sync a single goal to Notion (two-way sync)
+  // goalIndex: which goal to update (0, 1, or 2)
+  // goalId: the Task Calendar page ID to set for this goal
+  const syncSingleGoalToNotion = async (goalIndex: number, goalId: string) => {
     try {
       setSyncing(true)
       const res = await fetch('/api/goals', {
@@ -299,37 +326,25 @@ export default function DailyGoals() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           date: dateStr,
-          goalIds: newGoalIds,
+          goalIndex,
+          goalId,
         }),
       })
       if (res.ok) {
         const data = await res.json()
-        // Only update the specific goal that was changed (if goalIndex provided)
-        // This prevents Goal 2/3 from getting populated when only Goal 1 is selected
-        if (goalIndex !== undefined && data.goals && data.goalIds) {
-          // Only update the changed goal's title - keep others as they were
-          setGoals(prev => {
-            const next = [...prev]
-            next[goalIndex] = data.goals[goalIndex] || ""
-            return next
-          })
-          setGoalIds(prev => {
-            const next = [...prev]
-            next[goalIndex] = data.goalIds[goalIndex] || null
-            return next
-          })
-        } else if (data.goals && data.goalIds) {
-          // Full update (if no specific goal index provided)
+        // Update all goals/goalIds from response (API now preserves unchanged goals)
+        if (data.goals && data.goalIds) {
           setGoals(data.goals)
           setGoalIds(data.goalIds)
         }
         setSource("notion")
-        console.log("Goals synced to Notion:", data)
+        console.log(`Goal ${goalIndex + 1} synced to Notion:`, data)
       } else {
-        console.error("Failed to sync goals to Notion")
+        const errorData = await res.json().catch(() => ({}))
+        console.error("Failed to sync goal to Notion:", errorData)
       }
     } catch (err) {
-      console.error("Error syncing goals to Notion:", err)
+      console.error("Error syncing goal to Notion:", err)
     } finally {
       setSyncing(false)
     }
@@ -347,17 +362,30 @@ export default function DailyGoals() {
       setMonthlyGoal(title)
     } else {
       // Goals 0, 1, 2 -> sync to Notion
-      const next = [...goals]
-      next[pickerOpenFor] = title
-      setGoals(next)
+      const goalIndex = pickerOpenFor
 
-      // Update goalIds and sync to Notion
-      const newGoalIds = [...goalIds]
-      newGoalIds[pickerOpenFor] = taskId
-      setGoalIds(newGoalIds)
+      // Optimistically update local state
+      setGoals(prev => {
+        const next = [...prev]
+        next[goalIndex] = title
+        return next
+      })
+      setGoalIds(prev => {
+        const next = [...prev]
+        next[goalIndex] = taskId
+        return next
+      })
 
-      // Sync to Notion (two-way sync) - only update the specific goal that changed
-      await syncGoalsToNotion(newGoalIds, pickerOpenFor)
+      // Sync ONLY this specific goal to Notion
+      await syncSingleGoalToNotion(goalIndex, taskId)
+
+      // Dispatch event to notify To-Do panel to refresh subtasks for this goal
+      try {
+        const goalKey = goalIndex === 0 ? 'goal1' : goalIndex === 1 ? 'goal2' : 'goal3'
+        window.dispatchEvent(new CustomEvent('goalTaskSelected', {
+          detail: { goalKey, taskId, title }
+        }))
+      } catch {}
     }
     setPickerOpenFor(null)
   }
