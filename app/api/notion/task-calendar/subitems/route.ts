@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
 
   try {
     // Query tasks that have this parent in their "Parent item" relation
-    // Use dataSources.query for new Notion client v5+
+    // Use dataSources.query for Notion SDK v5+ with 2025-09-03 API
     const response = await (notion as any).dataSources.query({
       data_source_id: credentials.taskCalDbId,
       filter: {
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
     }
 
     // First, get the database schema to find the title property name
-    // Use dataSources.retrieve for new Notion client v5+
+    // Use dataSources.retrieve for Notion SDK v5+ with 2025-09-03 API
     const dbSchema: any = await (notion as any).dataSources.retrieve({ data_source_id: credentials.taskCalDbId })
     let titlePropertyName = "Task Plan" // Default for Task Calendar
 
@@ -156,7 +156,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Create the new sub-item
-    // Use data_source_id format (required for Notion SDK v5+ / 2025 API)
+    // Use data_source_id format for Notion SDK v5+ with 2025-09-03 API
     const newPage: any = await notion.pages.create({
       parent: { type: 'data_source_id', data_source_id: credentials.taskCalDbId },
       properties: {

@@ -24,7 +24,7 @@ export function getNotionCredentials() {
   }
 }
 
-// Create Notion client with credentials
+// Create Notion client with credentials (SDK v5.4.0 with 2025-09-03 API)
 export function getNotionClient() {
   const { token } = getNotionCredentials()
   return new Client({

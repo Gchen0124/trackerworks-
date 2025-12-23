@@ -20,7 +20,7 @@ export async function GET(_req: NextRequest) {
   }
 
   try {
-    // Use dataSources API for Notion client v5+
+    // Use dataSources API for Notion SDK v5+ with 2025-09-03 API
     const [drSchema, tcSchema] = await Promise.all([
       (notion as any).dataSources.retrieve({ data_source_id: credentials.dailyRitualDbId }),
       (notion as any).dataSources.retrieve({ data_source_id: credentials.taskCalDbId }),

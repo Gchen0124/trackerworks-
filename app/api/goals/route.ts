@@ -59,7 +59,7 @@ async function getTaskTitle(notionClient: any, pageId: string): Promise<string> 
 // Get the property type for the configured date property (date/title/rich_text)
 async function getDatePropType(notionClient: any, dailyRitualDbId: string): Promise<"date" | "title" | "rich_text" | "unknown"> {
   try {
-    // Use dataSources API for new Notion client v5+
+    // Use dataSources API for Notion SDK v5+ with 2025-09-03 API
     const db: any = await notionClient.dataSources.retrieve({ data_source_id: dailyRitualDbId })
     const prop = db?.properties?.[DR_PROPS.DATE]
     return (prop?.type as any) || "unknown"
@@ -82,7 +82,7 @@ async function findDailyRitualByDate(notionClient: any, dailyRitualDbId: string,
     // Fallback: try date equals (most common for Daily Ritual)
     filter = { property: DR_PROPS.DATE, date: { equals: dateStr } }
   }
-  // Use dataSources.query for new Notion client v5+
+  // Use dataSources.query for Notion SDK v5+ with 2025-09-03 API
   const response = await notionClient.dataSources.query({
     data_source_id: dailyRitualDbId,
     filter,
@@ -106,7 +106,7 @@ async function createDailyRitual(notionClient: any, dailyRitualDbId: string, dat
     properties[DR_PROPS.DATE] = { date: { start: dateStr } }
   }
   try {
-    // Use data_source_id for new Notion client v5+
+    // Use data_source_id for Notion SDK v5+ with 2025-09-03 API
     const page = await notionClient.pages.create({
       parent: { type: 'data_source_id', data_source_id: dailyRitualDbId },
       properties,

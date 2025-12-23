@@ -175,12 +175,12 @@ export async function GET(req: NextRequest) {
   const pageSize = Math.min(Number(req.nextUrl.searchParams.get("limit") || 50), 100)
 
   try {
-    // Use dataSources.retrieve for Notion client v5+
+    // Use dataSources API for Notion SDK v5+ with 2025-09-03 API
     const databaseSchema = await (notion as any).dataSources.retrieve({ data_source_id: credentials.taskCalDbId })
     const databaseTitle = getDatabaseTitle(databaseSchema)
     const titleProperty = resolveTitlePropertyName(databaseSchema)
 
-    // Use dataSources.query for Notion client v5+
+    // Use dataSources.query for Notion SDK v5+ with 2025-09-03 API
     const query: Record<string, any> = {
       data_source_id: credentials.taskCalDbId,
       page_size: pageSize,

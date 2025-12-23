@@ -140,12 +140,22 @@ export default function DailyGoals() {
         }
       }
 
+      // Prioritize Notion goals (from relation properties) over local goals
+      // For Goal 1/2/3, if Notion has data, use it; otherwise fall back to local
+      const notionGoals = notionData?.goals || ["", "", ""]
+      const localGoals = finalData.goals || ["", "", ""]
+
       const filled: GoalsResponse = {
         date: finalData.date,
-        weeklyGoal: finalData.weeklyGoal || "",
-        goals: [finalData.goals?.[0] || "", finalData.goals?.[1] || "", finalData.goals?.[2] || ""],
-        goalIds: finalData.goalIds || notionData?.goalIds || [null, null, null],
-        pageId: finalData.pageId || notionData?.pageId,
+        weeklyGoal: finalData.weeklyGoal || notionData?.weeklyGoal || "",
+        // Use Notion goals if they exist (from relation properties), otherwise use local
+        goals: [
+          notionGoals[0] || localGoals[0] || "",
+          notionGoals[1] || localGoals[1] || "",
+          notionGoals[2] || localGoals[2] || "",
+        ],
+        goalIds: notionData?.goalIds || finalData.goalIds || [null, null, null],
+        pageId: notionData?.pageId || finalData.pageId,
         source: notionData ? "notion" : "local",
         excitingGoal: finalData.excitingGoal || "",
         eoyGoal: finalData.eoyGoal || "",

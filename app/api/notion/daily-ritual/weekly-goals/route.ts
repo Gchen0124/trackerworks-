@@ -43,7 +43,7 @@ export async function GET(_req: NextRequest) {
   }
 
   try {
-    // Use dataSources.query for Notion client v5+
+    // Use dataSources.query for Notion SDK v5+ with 2025-09-03 API
     const res = await (notion as any).dataSources.query({
       data_source_id: credentials.dailyRitualDbId,
       page_size: 50,
