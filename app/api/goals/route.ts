@@ -68,27 +68,56 @@ async function getDatePropType(notionClient: any, dailyRitualDbId: string): Prom
   }
 }
 
-// Query the Daily Ritual DB by date string, adapting to property type
+// Query the Daily Ritual DB by date string, checking multiple date properties
+// to find existing pages regardless of which property holds the date
 async function findDailyRitualByDate(notionClient: any, dailyRitualDbId: string, dateStr: string) {
+  // Strategy 1: Query by the configured date property (e.g., title "date（daily ritual object）")
   const propType = await getDatePropType(notionClient, dailyRitualDbId)
-  let filter: any
-  if (propType === "date") {
-    filter = { property: DR_PROPS.DATE, date: { equals: dateStr } }
-  } else if (propType === "title") {
-    filter = { property: DR_PROPS.DATE, title: { equals: dateStr } }
-  } else if (propType === "rich_text") {
-    filter = { property: DR_PROPS.DATE, rich_text: { equals: dateStr } }
-  } else {
-    // Fallback: try date equals (most common for Daily Ritual)
-    filter = { property: DR_PROPS.DATE, date: { equals: dateStr } }
+  try {
+    let filter: any
+    if (propType === "date") {
+      filter = { property: DR_PROPS.DATE, date: { equals: dateStr } }
+    } else if (propType === "title") {
+      filter = { property: DR_PROPS.DATE, title: { equals: dateStr } }
+    } else if (propType === "rich_text") {
+      filter = { property: DR_PROPS.DATE, rich_text: { equals: dateStr } }
+    } else {
+      filter = { property: DR_PROPS.DATE, title: { equals: dateStr } }
+    }
+
+    const response = await notionClient.dataSources.query({
+      data_source_id: dailyRitualDbId,
+      filter,
+      page_size: 1,
+    })
+
+    if (response.results.length > 0) {
+      console.log(`findDailyRitualByDate: Found page for ${dateStr} via configured property (${DR_PROPS.DATE})`)
+      return response.results[0] as any
+    }
+  } catch (e) {
+    console.log("findDailyRitualByDate: Strategy 1 failed:", e)
   }
-  // Use dataSources.query for Notion SDK v5+ with 2025-09-03 API
-  const response = await notionClient.dataSources.query({
-    data_source_id: dailyRitualDbId,
-    filter,
-    page_size: 1,
-  })
-  return response.results[0] as any | undefined
+
+  // Strategy 2: Query by "Date on Daily RItual" date property (some pages use this instead)
+  try {
+    const response = await notionClient.dataSources.query({
+      data_source_id: dailyRitualDbId,
+      filter: { property: "Date on Daily RItual", date: { equals: dateStr } },
+      page_size: 1,
+    })
+
+    if (response.results.length > 0) {
+      console.log(`findDailyRitualByDate: Found page for ${dateStr} via "Date on Daily RItual" property`)
+      return response.results[0] as any
+    }
+  } catch (e) {
+    console.log("findDailyRitualByDate: Strategy 2 failed:", e)
+  }
+
+  // No page found with either method
+  console.log(`findDailyRitualByDate: No existing page found for ${dateStr}`)
+  return undefined
 }
 
 async function createDailyRitual(notionClient: any, dailyRitualDbId: string, dateStr: string) {
