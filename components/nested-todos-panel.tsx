@@ -236,7 +236,7 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
   }, [])
 
   const isChecked = useCallback((item: ItemRow) => Boolean(item.is_completed), [])
-  const setChecked = useCallback(async (id: string, checked: boolean, element?: Element | null, item?: ItemRow) => {
+  const setChecked = useCallback(async (id: string, checked: boolean, element?: Element | null, item?: ItemRow, goalKey?: GoalKey) => {
     // Update local state optimistically first
     setTree(prev => {
       const updated = { ...prev }
@@ -273,6 +273,26 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
           console.error('Failed to update Notion task status')
         }
         setNotionSyncing(prev => ({ ...prev, [id]: false }))
+
+        // If checking a subtask, also update parent goal status to "in_progress"
+        // (only if it's not already done or in progress)
+        if (checked && goalKey) {
+          const parentGoalId = notionGoalIds[goalKey]
+          if (parentGoalId) {
+            // Update parent goal to "in_progress" since at least one subtask is being worked on
+            const parentRes = await fetch('/api/notion/task-calendar/status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                taskId: parentGoalId,
+                status: "in_progress"
+              })
+            })
+            if (!parentRes.ok) {
+              console.error('Failed to update parent goal status to in_progress')
+            }
+          }
+        }
       } else {
         // Update local database
         const res = await fetch('/api/local/breakdown', {
@@ -295,7 +315,7 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
         return updated
       })
     }
-  }, [celebrateTaskCompletion])
+  }, [celebrateTaskCompletion, notionGoalIds])
 
   // Load today's goals (including Notion goal IDs for fetching subtasks)
   const loadGoals = useCallback(async () => {
@@ -826,21 +846,57 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
 
   const toggleGoal = async (goalKey: GoalKey, value: boolean, element?: Element | null) => {
     const items = tree[keyFor(goalKey, null)] || []
+    const notionGoalId = notionGoalIds[goalKey]
+
     try {
-      // Update all items in this goal
-      const updates = items.map(item => ({ id: item.id, is_completed: value }))
-      const res = await fetch('/api/local/breakdown', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: updates })
-      })
-      if (!res.ok) throw new Error('Failed to update goal completion status')
-      
+      // If we have a Notion goal ID, update the goal task status in Notion
+      if (notionGoalId) {
+        setNotionSyncing(prev => ({ ...prev, [notionGoalId]: true }))
+        const notionRes = await fetch('/api/notion/task-calendar/status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            taskId: notionGoalId,
+            status: value ? "done" : "not_started"
+          })
+        })
+        if (!notionRes.ok) {
+          console.error('Failed to update Notion goal task status')
+        }
+        setNotionSyncing(prev => ({ ...prev, [notionGoalId]: false }))
+
+        // Also update all Notion subtask items
+        for (const item of items) {
+          if (item.source === "notion") {
+            await fetch('/api/notion/task-calendar/status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                taskId: item.id,
+                status: value ? "done" : "not_started"
+              })
+            })
+          }
+        }
+      }
+
+      // Update local items
+      const localItems = items.filter(item => item.source !== "notion")
+      if (localItems.length > 0) {
+        const updates = localItems.map(item => ({ id: item.id, is_completed: value }))
+        const res = await fetch('/api/local/breakdown', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: updates })
+        })
+        if (!res.ok) throw new Error('Failed to update goal completion status')
+      }
+
       // Trigger confetti celebration when marking goal as complete
       if (value) {
         celebrateTaskCompletion(element, true) // Goal completion with dramatic effect
       }
-      
+
       // Reload the list to get fresh data
       await loadList(goalKey, null)
     } catch (e) {
@@ -1008,7 +1064,7 @@ function List({
   updateTitle: (id: string, title: string, item?: ItemRow) => Promise<void>
   deleteItem: (id: string, item?: ItemRow) => Promise<void>
   isChecked: (item: ItemRow) => boolean
-  setChecked: (id: string, v: boolean, element?: Element | null, item?: ItemRow) => Promise<void>
+  setChecked: (id: string, v: boolean, element?: Element | null, item?: ItemRow, goalKey?: GoalKey) => Promise<void>
   pendingEdits: Record<string, string>
   setPendingEdits: React.Dispatch<React.SetStateAction<Record<string, string>>>
   nextTask?: { goalKey: GoalKey; taskId: string } | null
@@ -1166,6 +1222,7 @@ function List({
             setPendingEdits={setPendingEdits}
             setTree={setTree}
             isNextTask={nextTask?.goalKey === goalKey && nextTask?.taskId === it.id}
+            goalKey={goalKey}
           >
             {expanded[it.id] && (
               <List
@@ -1227,18 +1284,19 @@ function List({
   )
 }
 
-function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, setChecked, pendingEdits, setPendingEdits, setTree, isNextTask, children }: {
+function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, setChecked, pendingEdits, setPendingEdits, setTree, isNextTask, goalKey, children }: {
   item: ItemRow
   expanded: boolean
   onExpand: (id: string) => void
   onRename: (id: string, title: string, item?: ItemRow) => Promise<void>
   onDelete: (id: string, item?: ItemRow) => Promise<void>
   isChecked: (item: ItemRow) => boolean
-  setChecked: (id: string, v: boolean, element?: Element | null, item?: ItemRow) => Promise<void>
+  setChecked: (id: string, v: boolean, element?: Element | null, item?: ItemRow, goalKey?: GoalKey) => Promise<void>
   pendingEdits: Record<string, string>
   setPendingEdits: React.Dispatch<React.SetStateAction<Record<string, string>>>
   setTree: React.Dispatch<React.SetStateAction<Record<string, ItemRow[]>>>
   isNextTask?: boolean
+  goalKey: GoalKey
   children?: React.ReactNode
 }) {
   // Use pending edit if available, otherwise use item title
@@ -1310,7 +1368,7 @@ function TreeNode({ item, expanded, onExpand, onRename, onDelete, isChecked, set
           checked={checked as any}
           onCheckedChange={(v) => {
             const checkbox = document.activeElement as Element
-            setChecked(item.id, Boolean(v), checkbox, item)
+            setChecked(item.id, Boolean(v), checkbox, item, goalKey)
           }}
           className={`mt-1 border-zinc-400 bg-transparent rounded-md data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 ${
             isNextTask && !checked ? 'next-task-checkbox' : ''
