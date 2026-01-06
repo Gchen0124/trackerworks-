@@ -325,7 +325,9 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
         const notionRes = await fetch(`/api/goals?date=${dateStr}`)
         if (notionRes.ok) {
           const notionData = await notionRes.json()
+          console.log('[NestedTodosPanel] Loaded goals from Notion:', notionData)
           if (notionData?.goalIds) {
+            console.log('[NestedTodosPanel] Setting notionGoalIds:', notionData.goalIds)
             setNotionGoalIds({
               goal1: notionData.goalIds[0] || null,
               goal2: notionData.goalIds[1] || null,
@@ -480,32 +482,6 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
       savePendingEdits()
     }
   }, [open, pendingEdits, savePendingEdits])
-  useEffect(() => {
-    const onDailyGoalsUpdated = (e: Event) => {
-      try {
-        const detail = (e as CustomEvent).detail as { goals?: string[]; goalIds?: (string | null)[] }
-        if (detail?.goals && Array.isArray(detail.goals)) {
-          setGoals([detail.goals[0] || "", detail.goals[1] || "", detail.goals[2] || ""])
-        }
-        // Also update goalIds if available (for Notion sync)
-        if (detail?.goalIds && Array.isArray(detail.goalIds)) {
-          setNotionGoalIds({
-            goal1: detail.goalIds[0] || null,
-            goal2: detail.goalIds[1] || null,
-            goal3: detail.goalIds[2] || null,
-          })
-        }
-      } catch {}
-    }
-    if (typeof window !== 'undefined') {
-      window.addEventListener('dailyGoalsUpdated', onDailyGoalsUpdated as EventListener)
-    }
-    return () => {
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('dailyGoalsUpdated', onDailyGoalsUpdated as EventListener)
-      }
-    }
-  }, [])
 
   // Load list for a goal + parent (now supports Notion subitems)
   const loadList = useCallback(async (goalKey: GoalKey, parentId: string | null) => {
@@ -515,14 +491,17 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
     try {
       // Get the Notion goal ID for this goal
       const notionGoalId = notionGoalIds[goalKey]
+      console.log(`[loadList] Loading ${goalKey}, parentId:${parentId}, notionGoalId:${notionGoalId}`)
 
       // If we have a Notion goal ID and this is the root level (parentId is null),
       // fetch subitems from Notion first
       if (notionGoalId && parentId === null) {
         try {
+          console.log(`[loadList] Fetching Notion subitems for ${goalKey} from parent ${notionGoalId}`)
           const notionRes = await fetch(`/api/notion/task-calendar/subitems?parentId=${notionGoalId}`)
           if (notionRes.ok) {
             const notionData = await notionRes.json()
+            console.log(`[loadList] Got ${notionData?.items?.length || 0} subitems for ${goalKey}:`, notionData)
             // Even if items is empty, set it - don't fall through to local
             // This shows "No items yet" when the Notion task has no subitems
             const rows: ItemRow[] = (notionData?.items || []).map((r: any, i: number) => ({
@@ -539,11 +518,15 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
             setTree(prev => ({ ...prev, [k]: rows }))
             setLoading(prev => ({ ...prev, [k]: false }))
             return // Use Notion data (even if empty)
+          } else {
+            console.error(`[loadList] Failed to fetch subitems for ${goalKey}, status:`, notionRes.status)
           }
         } catch (notionErr) {
-          console.warn("Failed to fetch subitems from Notion:", notionErr)
+          console.warn(`[loadList] Error fetching subitems for ${goalKey}:`, notionErr)
           // Fall through to local on error
         }
+      } else {
+        console.log(`[loadList] No Notion goal ID for ${goalKey} or not root level, using local data`)
       }
 
       // If parentId is a Notion ID (from Notion subitems), fetch its children from Notion
