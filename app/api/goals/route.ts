@@ -190,11 +190,19 @@ export async function GET(req: NextRequest) {
     const goal2Ids = extractRelationIds(props?.[DR_PROPS.GOAL2])
     const goal3Ids = extractRelationIds(props?.[DR_PROPS.GOAL3])
 
+    console.log(`[/api/goals] Date: ${dateStr}`)
+    console.log(`[/api/goals] Goal 1 IDs:`, goal1Ids, `Property: ${DR_PROPS.GOAL1}`)
+    console.log(`[/api/goals] Goal 2 IDs:`, goal2Ids, `Property: ${DR_PROPS.GOAL2}`)
+    console.log(`[/api/goals] Goal 3 IDs:`, goal3Ids, `Property: ${DR_PROPS.GOAL3}`)
+
     const [g1, g2, g3] = await Promise.all([
       goal1Ids[0] ? getTaskTitle(notion, goal1Ids[0]) : Promise.resolve(""),
       goal2Ids[0] ? getTaskTitle(notion, goal2Ids[0]) : Promise.resolve(""),
       goal3Ids[0] ? getTaskTitle(notion, goal3Ids[0]) : Promise.resolve(""),
     ])
+
+    console.log(`[/api/goals] Goal titles: ["${g1}", "${g2}", "${g3}"]`)
+    console.log(`[/api/goals] Returning goalIds:`, [goal1Ids[0] || null, goal2Ids[0] || null, goal3Ids[0] || null])
 
     return Response.json({
       date: dateStr,
