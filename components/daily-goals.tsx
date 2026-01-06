@@ -55,6 +55,40 @@ export default function DailyGoals() {
 
   const storageKey = useMemo(() => todayKey(dateStr), [dateStr])
 
+  // Auto-update date at midnight and force refresh
+  useEffect(() => {
+    const checkDate = () => {
+      const currentDate = new Date().toISOString().slice(0, 10)
+      if (currentDate !== dateStr) {
+        console.log(`Date changed from ${dateStr} to ${currentDate}, refreshing goals...`)
+        setDateStr(currentDate)
+      }
+    }
+
+    // Check immediately on mount
+    checkDate()
+
+    // Set up interval to check every minute (to catch midnight transition)
+    const intervalId = setInterval(checkDate, 60000) // Check every 60 seconds
+
+    // Also set up a specific timeout for midnight
+    const now = new Date()
+    const tomorrow = new Date(now)
+    tomorrow.setHours(24, 0, 0, 0) // Midnight tonight
+    const msUntilMidnight = tomorrow.getTime() - now.getTime()
+
+    const midnightTimeoutId = setTimeout(() => {
+      checkDate()
+      // Set up recurring midnight checks every 24 hours
+      setInterval(checkDate, 24 * 60 * 60 * 1000)
+    }, msUntilMidnight)
+
+    return () => {
+      clearInterval(intervalId)
+      clearTimeout(midnightTimeoutId)
+    }
+  }, [dateStr])
+
   const loadFromLocal = () => {
     try {
       const raw = localStorage.getItem(storageKey)
