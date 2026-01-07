@@ -150,10 +150,7 @@ export default function ProgressCheckPopup({
       audio.src = url
       audio.onended = () => {
         URL.revokeObjectURL(url)
-        // Resume listening after audio playback finishes
-        if (isOpenRef.current && countdownRef.current > 0 && !decisionMadeRef.current && sessionActiveRef.current) {
-          setTimeout(() => startRecognition(), 120)
-        }
+        // Note: mic is now already listening, no need to restart here
       }
       audio.onerror = () => {
         URL.revokeObjectURL(url)
@@ -174,11 +171,29 @@ export default function ProgressCheckPopup({
     const utterance = new SpeechSynthesisUtterance(message)
     utterance.rate = 0.9
     utterance.onend = () => {
-      if (isOpenRef.current && countdownRef.current > 0 && !decisionMadeRef.current && sessionActiveRef.current) {
-        setTimeout(() => startRecognition(), 120)
-      }
+      // Note: mic is now already listening, no need to start here
     }
     try { speechSynthesis.speak(utterance) } catch (_) {}
+  }
+
+  // Play a ready beep when mic starts
+  const playReadyBeep = () => {
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+      const oscillator = audioContext.createOscillator()
+      const gainNode = audioContext.createGain()
+
+      oscillator.connect(gainNode)
+      gainNode.connect(audioContext.destination)
+
+      oscillator.frequency.value = 800 // 800Hz beep
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime) // Volume
+
+      oscillator.start(audioContext.currentTime)
+      oscillator.stop(audioContext.currentTime + 0.1) // 100ms beep
+    } catch (e) {
+      console.warn("Could not play ready beep:", e)
+    }
   }
 
   // Best-effort mic warm-up to ensure permission and open device
@@ -208,12 +223,57 @@ export default function ProgressCheckPopup({
     }
   }
 
+  // Levenshtein distance for fuzzy matching
+  const levenshteinDistance = (str1: string, str2: string): number => {
+    const len1 = str1.length
+    const len2 = str2.length
+    const matrix: number[][] = []
+
+    for (let i = 0; i <= len1; i++) {
+      matrix[i] = [i]
+    }
+    for (let j = 0; j <= len2; j++) {
+      matrix[0][j] = j
+    }
+
+    for (let i = 1; i <= len1; i++) {
+      for (let j = 1; j <= len2; j++) {
+        const cost = str1[i - 1] === str2[j - 1] ? 0 : 1
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1,     // deletion
+          matrix[i][j - 1] + 1,     // insertion
+          matrix[i - 1][j - 1] + cost // substitution
+        )
+      }
+    }
+    return matrix[len1][len2]
+  }
+
+  // Fuzzy phrase matching
+  const isFuzzyMatch = (heard: string, target: string): boolean => {
+    heard = heard.toLowerCase().trim()
+    target = target.toLowerCase()
+
+    // Exact match
+    if (heard === target) return true
+
+    // Contains match
+    if (heard.includes(target) || target.includes(heard)) return true
+
+    // Levenshtein distance <= 2 (allows for minor typos/mishears)
+    return levenshteinDistance(heard, target) <= 2
+  }
+
+  const matchesAnyPhrase = (heard: string, phrases: string[]): boolean => {
+    return phrases.some(phrase => isFuzzyMatch(heard, phrase))
+  }
+
   // Normalize and evaluate speech transcript to trigger actions
   const handleTranscript = (raw: string) => {
     const text = raw.toLowerCase().trim()
     // Guard: ignore empty
     if (!text) return
-    // If user clearly says done
+    // If user clearly says done - expanded list with common affirmatives
     const donePhrases = [
       "done",
       "i'm done",
@@ -225,8 +285,21 @@ export default function ProgressCheckPopup({
       "all done",
       "i'm finished",
       "task done",
+      // New additions - common affirmatives
+      "yes",
+      "yep",
+      "yeah",
+      "ok",
+      "okay",
+      "yup",
+      "good",
+      "all good",
+      "finished it",
+      "i'm good",
+      "we're good",
+      "all set",
     ]
-    // If user wants to continue / still doing
+    // If user wants to continue / still doing - expanded list
     const continuePhrases = [
       "still doing",
       "still working",
@@ -238,6 +311,15 @@ export default function ProgressCheckPopup({
       "more time",
       "continue task",
       "carry on",
+      // New additions
+      "nope",
+      "no",
+      "not yet",
+      "almost",
+      "give me more time",
+      "one more minute",
+      "i'm continuing",
+      "continuing",
     ]
 
     // If user wants to stick to plan (when current is pinned)
@@ -319,12 +401,31 @@ export default function ProgressCheckPopup({
   }
 
   const startRecognition = () => {
+    console.log("[Voice] startRecognition called")
     // Avoid starting multiple times
-    if (isListening || decisionMadeRef.current) return
-    if (!sessionActiveRef.current) return
-    if (recognitionStartingRef.current) return
+    if (isListening) {
+      console.log("[Voice] Already listening, skipping")
+      return
+    }
+    if (decisionMadeRef.current) {
+      console.log("[Voice] Decision already made, skipping")
+      return
+    }
+    if (!sessionActiveRef.current) {
+      console.log("[Voice] Session not active, skipping")
+      return
+    }
+    if (recognitionStartingRef.current) {
+      console.log("[Voice] Recognition already starting, skipping")
+      return
+    }
     const SpeechRecognition: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-    if (!SpeechRecognition) return
+    if (!SpeechRecognition) {
+      console.error("[Voice] ❌ Web Speech API NOT SUPPORTED in this browser!")
+      console.error("[Voice] Please use Chrome or Edge browser")
+      return
+    }
+    console.log("[Voice] ✅ Web Speech API supported, creating recognition...")
 
     // Debounce rapid restarts
     const now = Date.now()
@@ -463,15 +564,19 @@ export default function ProgressCheckPopup({
 
       sessionActiveRef.current = true
       hasInitiatedListeningRef.current = true
+
       // Warm up mic first (non-blocking)
       warmUpMic().finally(() => {
         const startAfterTTS = () => {
           // If no TTS support, just start
           if (!("speechSynthesis" in window)) {
-            if (isOpenRef.current && countdownRef.current > 0 && !decisionMadeRef.current && sessionActiveRef.current) startRecognition()
+            if (isOpenRef.current && countdownRef.current > 0 && !decisionMadeRef.current && sessionActiveRef.current) {
+              startRecognition()
+              playReadyBeep()
+            }
             return
           }
-          // Wait until speech synthesis is not speaking
+          // Wait until speech synthesis is not speaking (to avoid mic picking up TTS!)
           const maxWaitMs = 4000
           const intervalMs = 100
           let waited = 0
@@ -484,14 +589,27 @@ export default function ProgressCheckPopup({
               clearInterval(iv)
               if (isOpenRef.current && countdownRef.current > 0 && !decisionMadeRef.current && sessionActiveRef.current) {
                 // slight delay to allow audio device handoff from TTS
-                console.debug("[Voice] TTS finished or max wait reached, starting recognition soon")
-                setTimeout(() => startRecognition(), 120)
+                console.debug("[Voice] TTS finished, starting recognition now")
+                setTimeout(() => {
+                  startRecognition()
+                  playReadyBeep()
+                }, 120)
               }
             } else {
               waited += intervalMs
             }
           }, intervalMs)
         }
+        // Start TTS first, then wait for it to finish
+        speakMessage(
+          `Block completed. How did you do with ${
+            completedBlock?.task?.title
+              ? completedBlock.goal?.label
+                ? `${completedBlock.goal.label} : ${completedBlock.task.title}`
+                : completedBlock.task.title
+              : "your task"
+          }?`
+        )
         // Kick off the wait logic
         startAfterTTS()
       })
@@ -535,9 +653,9 @@ export default function ProgressCheckPopup({
                 {countdown}s
               </div>
               {isListening && (
-                <div className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-purple-100 text-purple-700">
-                  <Mic className="h-3 w-3" />
-                  Listening
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-green-500 text-white font-bold animate-pulse shadow-lg">
+                  <Mic className="h-4 w-4 animate-bounce" />
+                  <span className="text-sm">LISTENING</span>
                 </div>
               )}
               <Button
