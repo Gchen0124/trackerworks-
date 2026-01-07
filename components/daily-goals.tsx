@@ -376,10 +376,21 @@ export default function DailyGoals() {
       })
       if (res.ok) {
         const data = await res.json()
-        // Update all goals/goalIds from response (API now preserves unchanged goals)
-        if (data.goals && data.goalIds) {
-          setGoals(data.goals)
-          setGoalIds(data.goalIds)
+        // Only update the specific goal that was synced, preserve local goals
+        // This prevents overwriting local-only goals when Notion returns empty for them
+        if (data.goalIds) {
+          setGoalIds(prev => {
+            const next = [...prev]
+            next[goalIndex] = data.goalIds[goalIndex]
+            return next
+          })
+        }
+        if (data.goals && data.goals[goalIndex]) {
+          setGoals(prev => {
+            const next = [...prev]
+            next[goalIndex] = data.goals[goalIndex]
+            return next
+          })
         }
         setSource("notion")
         console.log(`Goal ${goalIndex + 1} synced to Notion:`, data)
