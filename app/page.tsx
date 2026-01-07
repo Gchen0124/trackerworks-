@@ -918,6 +918,85 @@ export default function TimeTracker() {
     }
   }, [])
 
+  // Auto-save schedule to Notion every 10 minutes
+  const [lastNotionSave, setLastNotionSave] = useState<Date | null>(null)
+  const [isSavingToNotion, setIsSavingToNotion] = useState(false)
+
+  const saveScheduleToNotion = async () => {
+    if (isSavingToNotion) return
+
+    try {
+      setIsSavingToNotion(true)
+
+      // Generate schedule data (similar to CSV export)
+      const toMinutes = (hhmm: string) => {
+        const [h, m] = hhmm.split(':').map(Number)
+        return h * 60 + m
+      }
+
+      const today = new Date()
+      const ymd = today.toISOString().slice(0, 10)
+
+      const scheduleData = timeBlocks.map((b) => {
+        const duration = toMinutes(b.endTime) - toMinutes(b.startTime)
+        const status = getBlockTimeStatus(b.id)
+        return {
+          date: ymd,
+          start_time: b.startTime,
+          end_time: b.endTime,
+          duration_min: duration,
+          status,
+          task_title: b.task?.title ?? '',
+          task_type: (b as any).task?.type ?? '',
+          task_color: b.task?.color ?? '',
+          goal_label: b.goal?.label ?? '',
+          goal_color: b.goal?.color ?? '',
+          is_active: (b as any).isActive ? '1' : '0',
+          is_completed: (b as any).isCompleted ? '1' : '0',
+        }
+      })
+
+      const response = await fetch('/api/notion/daily-ritual/save-schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scheduleData,
+          date: ymd,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (response.ok) {
+        setLastNotionSave(new Date())
+        console.log('✅ Schedule saved to Notion:', result.message)
+      } else {
+        console.error('❌ Failed to save to Notion:', result.error)
+      }
+    } catch (error) {
+      console.error('❌ Error saving to Notion:', error)
+    } finally {
+      setIsSavingToNotion(false)
+    }
+  }
+
+  // Auto-save every 10 minutes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      saveScheduleToNotion()
+    }, 10 * 60 * 1000) // 10 minutes in milliseconds
+
+    // Also save on first load after 30 seconds
+    const initialTimeout = setTimeout(() => {
+      saveScheduleToNotion()
+    }, 30000)
+
+    return () => {
+      clearInterval(interval)
+      clearTimeout(initialTimeout)
+    }
+  }, [timeBlocks]) // Re-run if timeBlocks change
+
   const getCurrentBlockId = (time?: Date) => {
     const now = time || new Date()
     const totalMinutes = now.getHours() * 60 + now.getMinutes()
@@ -2480,6 +2559,21 @@ export default function TimeTracker() {
             <Button variant="outline" className="flex items-center gap-2" onClick={exportTodayCsv}>
               Export CSV
             </Button>
+
+            {/* Notion Auto-Save Indicator */}
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-950 rounded-md border border-blue-200 dark:border-blue-800">
+              <Database className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+              <span className="text-xs text-blue-700 dark:text-blue-300">
+                {isSavingToNotion ? (
+                  "Saving to Notion..."
+                ) : lastNotionSave ? (
+                  `Saved ${Math.floor((Date.now() - lastNotionSave.getTime()) / 60000)}m ago`
+                ) : (
+                  "Auto-save in 30s"
+                )}
+              </span>
+            </div>
+
             <Button variant="outline" size="icon" onClick={() => setShowNotionSettings(true)} title="Configure Notion Integration">
               <Database className="h-4 w-4" />
             </Button>
