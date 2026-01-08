@@ -34,7 +34,15 @@ export default function DailyGoals() {
   const [weeklyGoal, setWeeklyGoal] = useState("")
   const [goals, setGoals] = useState<string[]>(["", "", ""]) // 3 goals
   const [goalIds, setGoalIds] = useState<(string | null)[]>([null, null, null]) // Notion page IDs for goals
-  const [dateStr, setDateStr] = useState<string>(() => new Date().toISOString().slice(0, 10))
+  // Use local date (not UTC) for proper timezone handling
+  const getLocalDateStr = () => {
+    const now = new Date()
+    const y = now.getFullYear()
+    const m = (now.getMonth() + 1).toString().padStart(2, "0")
+    const d = now.getDate().toString().padStart(2, "0")
+    return `${y}-${m}-${d}`
+  }
+  const [dateStr, setDateStr] = useState<string>(getLocalDateStr)
   const [source, setSource] = useState<"notion" | "local">("local")
   const [notionPageId, setNotionPageId] = useState<string | null>(null) // Daily Ritual page ID
   const [pickerOpenFor, setPickerOpenFor] = useState<number | null>(null)
@@ -58,9 +66,9 @@ export default function DailyGoals() {
   // Auto-update date at midnight and force refresh
   useEffect(() => {
     const checkDate = () => {
-      const currentDate = new Date().toISOString().slice(0, 10)
+      const currentDate = getLocalDateStr() // Use local date, not UTC
       if (currentDate !== dateStr) {
-        console.log(`Date changed from ${dateStr} to ${currentDate}, refreshing goals...`)
+        console.log(`[DailyGoals] Date changed from ${dateStr} to ${currentDate}, refreshing goals...`)
         setDateStr(currentDate)
       }
     }

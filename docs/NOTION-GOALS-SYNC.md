@@ -175,6 +175,32 @@ setGoalIds(prev => {
 1. In Notion Task Calendar, verify subtasks have "Parent item" set to the goal task
 2. Check server logs for `/api/notion/task-calendar/subitems` response
 
+### Issue: Goals not updating at midnight / wrong date
+
+**Cause:** Using `toISOString().slice(0,10)` returns UTC date, not local date.
+
+**Example:** At 1:00 AM in UTC+8 timezone (local: Jan 8), `toISOString()` returns `2026-01-07` (UTC).
+
+**Fix (2026-01-08):** Use local date calculation instead of UTC:
+```typescript
+// Before (bug) - UTC date
+const dateStr = new Date().toISOString().slice(0, 10)
+
+// After (fixed) - Local date
+const getLocalDateStr = () => {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = (now.getMonth() + 1).toString().padStart(2, "0")
+  const d = now.getDate().toString().padStart(2, "0")
+  return `${y}-${m}-${d}`
+}
+const [dateStr, setDateStr] = useState(getLocalDateStr)
+```
+
+**Files affected:**
+- `components/daily-goals.tsx` - Today's Focus panel
+- `components/nested-todos-panel.tsx` - Side panel
+
 ## Database Schema
 
 ### Local SQLite (`goals` table)

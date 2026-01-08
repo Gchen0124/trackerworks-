@@ -65,14 +65,41 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
   const STORAGE_KEY = "nestedTodosDone:v1"
   const [doneMap, setDoneMap] = useState<Record<string, boolean>>({})
 
-  // YYYY-MM-DD based on local time
-  const dateStr = useMemo(() => {
+  // YYYY-MM-DD based on local time - updates at midnight
+  const getDateStr = () => {
     const now = new Date()
     const y = now.getFullYear()
     const m = (now.getMonth() + 1).toString().padStart(2, "0")
     const d = now.getDate().toString().padStart(2, "0")
     return `${y}-${m}-${d}`
-  }, [])
+  }
+  const [dateStr, setDateStr] = useState(getDateStr)
+
+  // Check for date change every 60 seconds (handles midnight transition)
+  useEffect(() => {
+    const checkDateChange = () => {
+      const currentDate = getDateStr()
+      if (currentDate !== dateStr) {
+        console.log(`[NestedTodosPanel] Date changed from ${dateStr} to ${currentDate}`)
+        setDateStr(currentDate)
+        // Clear all tree data to reload fresh for new date
+        setTree({})
+        setNotionGoalIds({ goal1: null, goal2: null, goal3: null })
+        setGoals(["", "", ""])
+        setNotes("")
+        // Increment refresh key to trigger reload
+        setRefreshKey(k => k + 1)
+      }
+    }
+
+    // Check immediately
+    checkDateChange()
+
+    // Then check every 60 seconds
+    const intervalId = setInterval(checkDateChange, 60000)
+
+    return () => clearInterval(intervalId)
+  }, [dateStr])
 
   const goalIdFor = useCallback((goalKey: GoalKey) => `${dateStr}#${goalKey}` as const, [dateStr])
   const keyFor = useCallback((goalKey: GoalKey, parentId: string | null) => `${goalKey}|${parentId || "root"}`, [])
