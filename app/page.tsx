@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -187,6 +187,14 @@ export default function TimeTracker() {
   const [activeWindow, setActiveWindow] = useState<{ activeStartMinute: number | null; activeEndMinute: number | null } | null>(null)
   const [showActiveWindowSetup, setShowActiveWindowSetup] = useState(false)
 
+  // Use local day (not UTC) so daily records map to the user's actual day.
+  const formatLocalDateYYYYMMDD = (date: Date = new Date()) => {
+    const y = date.getFullYear()
+    const m = String(date.getMonth() + 1).padStart(2, "0")
+    const d = String(date.getDate()).padStart(2, "0")
+    return `${y}-${m}-${d}`
+  }
+
 
   // Multi-select and bulk move state
   const [multiSelect, setMultiSelect] = useState<{ isActive: boolean; selected: string[]; lastAnchorId: string | null }>({
@@ -207,7 +215,7 @@ export default function TimeTracker() {
   const [dailyGoals, setDailyGoals] = useState<string[]>(["", "", ""]) // [goal1, goal2, goal3]
 
   const getTodayKey = () => {
-    const d = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
+    const d = formatLocalDateYYYYMMDD()
     return `goals:${d}`
   }
 
@@ -921,11 +929,18 @@ export default function TimeTracker() {
   // Auto-save schedule to Notion every 10 minutes
   const [lastNotionSave, setLastNotionSave] = useState<Date | null>(null)
   const [isSavingToNotion, setIsSavingToNotion] = useState(false)
+  const isSavingToNotionRef = useRef(false)
+  const timeBlocksRef = useRef<TimeBlock[]>([])
 
-  const saveScheduleToNotion = async () => {
-    if (isSavingToNotion) return
+  useEffect(() => {
+    timeBlocksRef.current = timeBlocks
+  }, [timeBlocks])
+
+  const saveScheduleToNotion = useCallback(async () => {
+    if (isSavingToNotionRef.current) return
 
     try {
+      isSavingToNotionRef.current = true
       setIsSavingToNotion(true)
 
       // Generate schedule data (similar to CSV export)
@@ -935,11 +950,21 @@ export default function TimeTracker() {
       }
 
       const today = new Date()
-      const ymd = today.toISOString().slice(0, 10)
+      const ymd = formatLocalDateYYYYMMDD(today)
+      const currentTotalMinutes = today.getHours() * 60 + today.getMinutes()
+      const currentBlockIndex = Math.floor(currentTotalMinutes / blockDurationMinutes)
+      const currentBlockStart = currentBlockIndex * blockDurationMinutes
 
-      const scheduleData = timeBlocks.map((b) => {
+      const getStatusForBlock = (blockId: string): 'past' | 'current' | 'future' => {
+        const [h, m] = blockId.split('-').map(Number)
+        const blockStart = h * 60 + m
+        if (blockStart === currentBlockStart) return 'current'
+        return blockStart < currentBlockStart ? 'past' : 'future'
+      }
+
+      const scheduleData = timeBlocksRef.current.map((b) => {
         const duration = toMinutes(b.endTime) - toMinutes(b.startTime)
-        const status = getBlockTimeStatus(b.id)
+        const status = getStatusForBlock(b.id)
         return {
           date: ymd,
           start_time: b.startTime,
@@ -976,9 +1001,10 @@ export default function TimeTracker() {
     } catch (error) {
       console.error('❌ Error saving to Notion:', error)
     } finally {
+      isSavingToNotionRef.current = false
       setIsSavingToNotion(false)
     }
-  }
+  }, [blockDurationMinutes])
 
   // Auto-save every 10 minutes
   useEffect(() => {
@@ -995,7 +1021,7 @@ export default function TimeTracker() {
       clearInterval(interval)
       clearTimeout(initialTimeout)
     }
-  }, [timeBlocks]) // Re-run if timeBlocks change
+  }, [saveScheduleToNotion])
 
   const getCurrentBlockId = (time?: Date) => {
     const now = time || new Date()
@@ -1040,7 +1066,7 @@ export default function TimeTracker() {
       }
 
       const today = new Date()
-      const ymd = today.toISOString().slice(0, 10)
+      const ymd = formatLocalDateYYYYMMDD(today)
 
       const headers = [
         'date',

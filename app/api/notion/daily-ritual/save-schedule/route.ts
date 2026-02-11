@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getNotionClient, getNotionCredentials, DR_PROPS } from '@/lib/notion'
 
 export const dynamic = 'force-dynamic'
+const NOTION_TEXT_CHUNK_SIZE = 1800
+const NOTION_APPEND_BATCH_SIZE = 90
 
 // Get the property type for the configured date property
 async function getDatePropType(notionClient: any, dailyRitualDbId: string): Promise<"date" | "title" | "rich_text" | "unknown"> {
@@ -14,8 +16,18 @@ async function getDatePropType(notionClient: any, dailyRitualDbId: string): Prom
   }
 }
 
+async function queryDailyRitualByFilter(notionClient: any, dailyRitualDbId: string, filter: any) {
+  const response = await notionClient.dataSources.query({
+    data_source_id: dailyRitualDbId,
+    filter,
+    page_size: 1,
+  })
+  return response.results?.[0] as any | undefined
+}
+
 // Find Daily Ritual page by date
 async function findDailyRitualByDate(notionClient: any, dailyRitualDbId: string, dateStr: string) {
+  // Strategy 1: configured date property
   const propType = await getDatePropType(notionClient, dailyRitualDbId)
   try {
     let filter: any
@@ -29,19 +41,150 @@ async function findDailyRitualByDate(notionClient: any, dailyRitualDbId: string,
       filter = { property: DR_PROPS.DATE, title: { equals: dateStr } }
     }
 
-    const response = await notionClient.dataSources.query({
-      data_source_id: dailyRitualDbId,
-      filter,
-      page_size: 1,
-    })
+    const page = await queryDailyRitualByFilter(notionClient, dailyRitualDbId, filter)
+    if (page) return page
+  } catch (e) {
+    console.log("findDailyRitualByDate strategy 1 failed:", e)
+  }
 
-    if (response.results.length > 0) {
-      return response.results[0] as any
+  // Strategy 2: known alternate date property names
+  const fallbackDateProps = ["Date on Daily RItual", "Date on Daily Ritual"]
+  for (const propName of fallbackDateProps) {
+    try {
+      const page = await queryDailyRitualByFilter(notionClient, dailyRitualDbId, {
+        property: propName,
+        date: { equals: dateStr },
+      })
+      if (page) return page
+    } catch (e) {
+      console.log(`findDailyRitualByDate fallback strategy failed for "${propName}":`, e)
+    }
+  }
+
+  // Strategy 3: scan recent pages and match any date/title/rich_text property value
+  try {
+    const recentPages = await notionClient.dataSources.query({
+      data_source_id: dailyRitualDbId,
+      page_size: 100,
+      sorts: [{ timestamp: 'last_edited_time', direction: 'descending' }],
+    })
+    for (const page of recentPages.results || []) {
+      const props = (page as any)?.properties || {}
+      for (const prop of Object.values(props) as any[]) {
+        if (!prop || typeof prop !== 'object') continue
+        if (prop.type === 'date') {
+          const start = prop.date?.start ? String(prop.date.start).slice(0, 10) : ''
+          if (start === dateStr) return page as any
+        }
+        if (prop.type === 'title' || prop.type === 'rich_text') {
+          const text = Array.isArray(prop[prop.type])
+            ? prop[prop.type].map((t: any) => t?.plain_text || '').join('').trim()
+            : ''
+          if (text === dateStr) return page as any
+        }
+      }
     }
   } catch (e) {
-    console.log("findDailyRitualByDate failed:", e)
+    console.log("findDailyRitualByDate strategy 3 failed:", e)
   }
+
   return undefined
+}
+
+function isValidDateString(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+}
+
+function splitTextForNotion(text: string, maxLen = NOTION_TEXT_CHUNK_SIZE): string[] {
+  if (!text) return ['']
+  if (text.length <= maxLen) return [text]
+
+  const lines = text.split('\n')
+  const chunks: string[] = []
+  let current = ''
+
+  for (const line of lines) {
+    const candidate = current ? `${current}\n${line}` : line
+    if (candidate.length <= maxLen) {
+      current = candidate
+      continue
+    }
+
+    if (current) {
+      chunks.push(current)
+      current = ''
+    }
+
+    if (line.length <= maxLen) {
+      current = line
+      continue
+    }
+
+    for (let i = 0; i < line.length; i += maxLen) {
+      chunks.push(line.slice(i, i + maxLen))
+    }
+  }
+
+  if (current) chunks.push(current)
+  return chunks.length > 0 ? chunks : [text.slice(0, maxLen)]
+}
+
+function buildScheduleBlocks(scheduleData: any[], updatedAtLabel: string) {
+  const scheduleMarkdown = formatScheduleAsMarkdown(scheduleData)
+  const markdownChunks = splitTextForNotion(scheduleMarkdown)
+
+  const children: any[] = [
+    {
+      object: 'block',
+      type: 'heading_2',
+      heading_2: {
+        rich_text: [
+          {
+            type: 'text',
+            text: {
+              content: `📅 Schedule Log - Updated ${updatedAtLabel}`,
+            },
+          },
+        ],
+      },
+    },
+  ]
+
+  for (const chunk of markdownChunks) {
+    children.push({
+      object: 'block',
+      type: 'code',
+      code: {
+        rich_text: [
+          {
+            type: 'text',
+            text: {
+              content: chunk,
+            },
+          },
+        ],
+        language: 'plain text',
+      },
+    })
+  }
+
+  children.push({
+    object: 'block',
+    type: 'divider',
+    divider: {},
+  })
+
+  return { children, chunkCount: markdownChunks.length }
+}
+
+async function appendBlocksInBatches(notionClient: any, pageId: string, children: any[]) {
+  for (let i = 0; i < children.length; i += NOTION_APPEND_BATCH_SIZE) {
+    const batch = children.slice(i, i + NOTION_APPEND_BATCH_SIZE)
+    await notionClient.blocks.children.append({
+      block_id: pageId,
+      children: batch,
+    })
+  }
 }
 
 // Save today's schedule to the Daily Ritual page
@@ -49,13 +192,16 @@ export async function POST(request: NextRequest) {
   try {
     const { scheduleData, date } = await request.json()
 
-    if (!scheduleData || !date) {
+    if (!Array.isArray(scheduleData) || !isValidDateString(date)) {
       return NextResponse.json({ error: 'Missing scheduleData or date' }, { status: 400 })
     }
 
-    const { dailyRitualDbId } = getNotionCredentials()
+    const { dailyRitualDbId, token } = getNotionCredentials()
     if (!dailyRitualDbId) {
       return NextResponse.json({ error: 'Daily Ritual database not configured' }, { status: 400 })
+    }
+    if (!token) {
+      return NextResponse.json({ error: 'Notion token not configured' }, { status: 400 })
     }
 
     const notion = getNotionClient()
@@ -64,61 +210,24 @@ export async function POST(request: NextRequest) {
     const page = await findDailyRitualByDate(notion, dailyRitualDbId, date)
 
     if (!page) {
-      return NextResponse.json({
-        error: `No Daily Ritual page found for ${date}. Please create it in Notion first.`,
-        needsPageCreation: true
-      }, { status: 404 })
+      return NextResponse.json(
+        {
+          error: `No Daily Ritual page found for ${date}. Auto-save is search-only and will not create pages.`,
+          needsPageCreation: true,
+        },
+        { status: 404 }
+      )
     }
 
     const pageId = page.id
 
-    // Format the schedule data as a nice table in markdown
-    const scheduleMarkdown = formatScheduleAsMarkdown(scheduleData)
-
-    // Append the schedule to the page content
-    await notion.blocks.children.append({
-      block_id: pageId,
-      children: [
-        {
-          object: 'block',
-          type: 'heading_2',
-          heading_2: {
-            rich_text: [
-              {
-                type: 'text',
-                text: {
-                  content: `📅 Schedule Log - Updated ${new Date().toLocaleTimeString()}`,
-                },
-              },
-            ],
-          },
-        },
-        {
-          object: 'block',
-          type: 'code',
-          code: {
-            rich_text: [
-              {
-                type: 'text',
-                text: {
-                  content: scheduleMarkdown,
-                },
-              },
-            ],
-            language: 'plain text',
-          },
-        },
-        {
-          object: 'block',
-          type: 'divider',
-          divider: {},
-        },
-      ],
-    })
+    const { children, chunkCount } = buildScheduleBlocks(scheduleData, new Date().toLocaleTimeString())
+    await appendBlocksInBatches(notion, pageId, children)
 
     return NextResponse.json({
       success: true,
       pageId,
+      chunksWritten: chunkCount,
       message: `Schedule saved to Daily Ritual page for ${date}`
     })
   } catch (error: any) {
