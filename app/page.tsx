@@ -2778,7 +2778,7 @@ export default function TimeTracker() {
                       className={cn(
                         "p-2 rounded-lg border-2 cursor-pointer transition-all flex flex-col justify-between relative",
                         // Make blocks square-ish to match width while keeping columns the same
-                        blockDurationMinutes === 3 ? "aspect-square p-1" : "aspect-square p-2",
+                        blockDurationMinutes === 3 ? "aspect-square p-1.5" : "aspect-square p-2",
                         {
                           "cursor-move": block.task && !isCurrentBlock,
                           "cursor-pointer": !block.task || isCurrentBlock,
@@ -2869,7 +2869,10 @@ export default function TimeTracker() {
                           )}
                           title={`Assigned Goal: ${block.goal.label}`}
                         >
-                          <span className="text-white text-[10px] sm:text-xs font-semibold tracking-wide drop-shadow leading-tight break-words whitespace-normal">
+                          <span className={cn(
+                            "text-white font-semibold tracking-wide drop-shadow leading-tight break-words whitespace-normal",
+                            blockDurationMinutes === 3 ? "text-[11px]" : "text-[10px] sm:text-xs"
+                          )}>
                             {block.goal.label}
                           </span>
                         </div>
@@ -2879,18 +2882,18 @@ export default function TimeTracker() {
                           <span
                             className={cn(
                               isCurrentBlock
-                                ? (blockDurationMinutes === 3 ? "text-sm" : "text-lg") + " text-white font-bold"
-                                : blockDurationMinutes === 3 ? "text-[10px] text-gray-600" : "text-xs text-gray-600",
+                                ? (blockDurationMinutes === 3 ? "text-base" : "text-lg") + " text-white font-bold"
+                                : blockDurationMinutes === 3 ? "text-xs text-gray-600 font-medium" : "text-xs text-gray-600",
                               // Make future blocks with a task show white time text for visibility
                               (!isCurrentBlock && blockStatus === 'future' && !!block.task) ? 'text-white' : '',
-                              // Push time text down: default a bit lower; even more for 1- and 3-minute modes
+                              // Push time text down: adjusted for better visibility in 3-minute mode
                               'inline-block',
-                              (blockDurationMinutes === 1 || blockDurationMinutes === 3) ? 'mt-5' : 'mt-2'
+                              (blockDurationMinutes === 1 || blockDurationMinutes === 3) ? 'mt-2' : 'mt-2'
                             )}
                           >
                             {isCurrentBlock
                               ? getRemainingTime(block)
-                              : blockDurationMinutes === 3 ? block.startTime : `${block.startTime} - ${block.endTime}`
+                              : blockDurationMinutes === 3 ? `${block.startTime.slice(0, -3)}` : `${block.startTime} - ${block.endTime}`
                             }
                           </span>
                         </div>
@@ -2920,19 +2923,19 @@ export default function TimeTracker() {
                           <div
                             className={cn(
                               "absolute left-2 right-3",
-                              // Start task text at the vertical middle so it can flow downward into bottom half
-                              "top-1/2"
+                              // Start task text at appropriate position based on mode
+                              blockDurationMinutes === 3 ? "top-[40%]" : "top-1/2"
                             )}
                           >
                             {(() => {
                               const title = block.task?.title || ""
                               const len = title.length
-                              // Base sizes by mode
-                              let sizeClass = blockDurationMinutes === 3 ? "text-xs" : "text-sm"
+                              // Base sizes by mode - improved for 3-minute mode
+                              let sizeClass = blockDurationMinutes === 3 ? "text-sm" : "text-sm"
                               // Shrink progressively when long to preserve visibility with long goals
                               if (blockDurationMinutes === 3) {
-                                if (len > 70) sizeClass = "text-[9px]"
-                                else if (len > 40) sizeClass = "text-[10px]"
+                                if (len > 80) sizeClass = "text-[11px]"
+                                else if (len > 50) sizeClass = "text-xs"
                               } else if (blockDurationMinutes === 1) {
                                 if (len > 70) sizeClass = "text-[9px]"
                                 else if (len > 45) sizeClass = "text-[10px]"
@@ -2947,7 +2950,7 @@ export default function TimeTracker() {
                                     `${sizeClass} font-medium`,
                                     (isCurrentBlock || isInPlanningSelection || (blockStatus === 'future' && !!block.task)) ? "text-white" : "text-gray-900",
                                     // Allow multi-line wrap and tighter leading
-                                    "leading-snug break-words"
+                                    "leading-tight break-words"
                                   )}
                                 >
                                   {title}
@@ -2981,11 +2984,11 @@ export default function TimeTracker() {
                         <div
                           className={cn(
                             "text-center transition-all duration-300",
-                            blockDurationMinutes === 3 ? "text-[10px]" : "text-xs",
+                            blockDurationMinutes === 3 ? "text-xs" : "text-xs",
                             isCurrentBlock ? "text-white opacity-80" : "text-gray-400",
                           )}
                         >
-                          {blockDurationMinutes === 3 ? "+" : "Click to add task"}
+                          {blockDurationMinutes === 3 ? "＋" : "Click to add task"}
                         </div>
                       )}
                     </div>
