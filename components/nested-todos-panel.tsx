@@ -348,26 +348,65 @@ export default function NestedTodosPanel({ open, onOpenChange }: NestedTodosPane
   const loadGoals = useCallback(async () => {
     try {
       // First try to get goals from Notion (which includes goalIds)
+      let notionData: { goals?: string[]; goalIds?: (string | null)[]; daysAgo?: number } | null = null
       try {
         const notionRes = await fetch(`/api/goals?date=${dateStr}`)
         if (notionRes.ok) {
-          const notionData = await notionRes.json()
+          notionData = await notionRes.json()
           console.log('[NestedTodosPanel] Loaded goals from Notion:', notionData)
-          if (notionData?.goalIds) {
-            console.log('[NestedTodosPanel] Setting notionGoalIds:', notionData.goalIds)
-            setNotionGoalIds({
-              goal1: notionData.goalIds[0] || null,
-              goal2: notionData.goalIds[1] || null,
-              goal3: notionData.goalIds[2] || null,
-            })
-          }
-          if (notionData?.goals) {
-            setGoals([notionData.goals[0] || "", notionData.goals[1] || "", notionData.goals[2] || ""])
-            return // Use Notion data
-          }
         }
       } catch (notionErr) {
         console.warn("Failed to fetch goals from Notion:", notionErr)
+      }
+
+      // Check if Notion returned any actual goalIds (not all nulls)
+      const hasNotionGoalIds = notionData?.goalIds?.some(id => id !== null)
+
+      // If today's Notion goals are empty, try to load from previous Notion dates
+      if (!hasNotionGoalIds) {
+        console.log('[NestedTodosPanel] Today has no goalIds, checking previous dates...')
+        // Try the last 7 days from Notion API
+        for (let i = 1; i <= 7; i++) {
+          const prevDate = new Date(dateStr)
+          prevDate.setDate(prevDate.getDate() - i)
+          const prevDateStr = prevDate.toISOString().slice(0, 10)
+
+          try {
+            const prevNotionRes = await fetch(`/api/goals?date=${prevDateStr}`)
+            if (prevNotionRes.ok) {
+              const prevData = await prevNotionRes.json()
+              // Check if this previous date has actual goalIds
+              if (prevData?.goalIds?.some((id: string | null) => id !== null)) {
+                console.log(`[NestedTodosPanel] Found goalIds from ${i} day(s) ago:`, prevData.goalIds)
+                notionData = {
+                  ...notionData,
+                  goalIds: prevData.goalIds,
+                  goals: prevData.goals || notionData?.goals,
+                }
+                break // Found valid goalIds, stop searching
+              }
+            }
+          } catch (prevErr) {
+            console.warn(`Failed to fetch goals from ${prevDateStr}:`, prevErr)
+          }
+        }
+      }
+
+      // Set goalIds if we have any actual values
+      const effectiveGoalIds = notionData?.goalIds?.some(id => id !== null)
+        ? notionData!.goalIds
+        : [null, null, null]
+
+      console.log('[NestedTodosPanel] Setting notionGoalIds:', effectiveGoalIds)
+      setNotionGoalIds({
+        goal1: effectiveGoalIds![0] || null,
+        goal2: effectiveGoalIds![1] || null,
+        goal3: effectiveGoalIds![2] || null,
+      })
+
+      if (notionData?.goals) {
+        setGoals([notionData.goals[0] || "", notionData.goals[1] || "", notionData.goals[2] || ""])
+        return // Use Notion data
       }
 
       // Fallback to local goals

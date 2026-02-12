@@ -187,6 +187,13 @@ export default function DailyGoals() {
       const notionGoals = notionData?.goals || ["", "", ""]
       const localGoals = finalData.goals || ["", "", ""]
 
+      // Check if Notion goalIds has any actual non-null values
+      // If all are null, fall back to recent/local goalIds
+      const hasNotionGoalIds = notionData?.goalIds?.some(id => id !== null)
+      const effectiveGoalIds = hasNotionGoalIds
+        ? notionData!.goalIds
+        : (finalData.goalIds || [null, null, null])
+
       const filled: GoalsResponse = {
         date: finalData.date,
         weeklyGoal: finalData.weeklyGoal || notionData?.weeklyGoal || "",
@@ -196,7 +203,7 @@ export default function DailyGoals() {
           notionGoals[1] || localGoals[1] || "",
           notionGoals[2] || localGoals[2] || "",
         ],
-        goalIds: notionData?.goalIds || finalData.goalIds || [null, null, null],
+        goalIds: effectiveGoalIds,
         pageId: notionData?.pageId || finalData.pageId,
         source: notionData ? "notion" : "local",
         excitingGoal: finalData.excitingGoal || "",
